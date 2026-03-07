@@ -3,9 +3,11 @@
     "name": "WorkoutTracker",
     "slug": "workouttracker",
     "version": "1.0.0",
+    "sdkVersion": "55.0.0",
     "orientation": "portrait",
     "scheme": "workouttracker",
     "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
     "icon": "./assets/icon.png",
     "splash": {
       "image": "./assets/splash.png",
@@ -13,11 +15,11 @@
       "backgroundColor": "#0f0f1a"
     },
     "android": {
-      "package": "com.lylejack.workouttracker",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0f0f1a"
       },
+      "package": "com.yourname.workouttracker",
       "permissions": [
         "RECEIVE_BOOT_COMPLETED",
         "SCHEDULE_EXACT_ALARM",
@@ -34,13 +36,12 @@
           "color": "#6C63FF",
           "sounds": []
         }
-      ]
+      ],
+      "expo-sharing",
+      "@react-native-community/datetimepicker"
     ],
-    "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "ed3c1a03-6ee3-41fa-a7db-6bcd107ea606"
-      }
+    "experiments": {
+      "typedRoutes": true
     }
   }
 }
