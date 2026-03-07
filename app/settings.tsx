@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, Switch, Alert, Platform, TextInput,
+  StyleSheet, Switch, Alert, Platform, TextInput, StatusBar,
 } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
@@ -15,7 +15,9 @@ import {
   setupNotificationHandler,
   isNotificationsSupported,
 } from '@/src/notifications';
-import { exportAllData, importAllData, getStreakOffset, setStreakOffset, deleteAllData, populateDummyData } from '@/src/db';
+import { AppHeader } from '@/app/_layout';
+import { ErrorBoundary } from '@/src/ErrorBoundary';
+import { exportAllData, importAllData, getStreakOffset, setStreakOffset, deleteAllData, populateDummyData, resetWithDummyData } from '@/src/db';
 
 export default function SettingsScreen() {
   const [notifEnabled, setNotifEnabled] = useState(false);
@@ -64,15 +66,36 @@ export default function SettingsScreen() {
 
   function handlePopulateDummy() {
     Alert.alert(
-      'Populate Dummy Data',
-      'This will add sample workouts, exercises and 8 weeks of sessions for testing. Existing data is kept.',
+      'Demo Data',
+      'Choose how to load the sample data.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Add dummy data',
+          text: 'Add to existing',
           onPress: () => {
             populateDummyData();
-            Alert.alert('Done', 'Dummy data has been added. Restart the app to see it reflected everywhere.');
+            Alert.alert('Done', 'Demo data added. Reload the app to see it everywhere.');
+          },
+        },
+        {
+          text: 'Reset & replace all data',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              'Replace all data?',
+              'Your existing workout history will be permanently deleted and replaced with demo data.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Yes, reset',
+                  style: 'destructive',
+                  onPress: () => {
+                    resetWithDummyData();
+                    Alert.alert('Done', 'All data replaced with demo data. Reload the app.');
+                  },
+                },
+              ]
+            );
           },
         },
       ]
@@ -151,7 +174,11 @@ export default function SettingsScreen() {
   const timeStr = notifTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
+    <ErrorBoundary fallbackLabel="Something went wrong in Settings.">
+    <View style={{ flex: 1, backgroundColor: '#000' }}>
+      <StatusBar barStyle="light-content" />
+      <AppHeader title="Settings" />
+      <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Daily Reminder</Text>
@@ -212,8 +239,6 @@ export default function SettingsScreen() {
           </View>
         </TouchableOpacity>
       </View>
-
-
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Streak</Text>
         <View style={styles.row}>
@@ -265,6 +290,8 @@ export default function SettingsScreen() {
       </View>
 
     </ScrollView>
+    </View>
+    </ErrorBoundary>
   );
 }
 

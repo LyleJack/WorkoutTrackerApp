@@ -1,9 +1,11 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, TextInput,
-  StyleSheet, Alert, Modal, ScrollView,
+  StyleSheet, Alert, Modal, ScrollView, StatusBar,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { AppHeader } from '@/app/_layout';
+import { ErrorBoundary } from '@/src/ErrorBoundary';
 import { Ionicons } from '@expo/vector-icons';
 import {
   getHistory, getSessionDetails, deleteSession,
@@ -130,6 +132,14 @@ function InlineCalendar({ year, month, selectedDate, onSelectDate, onChangeMonth
 }
 
 export default function HistoryScreen() {
+  return (
+    <ErrorBoundary fallbackLabel="Something went wrong in History.">
+      <HistoryScreenInner />
+    </ErrorBoundary>
+  );
+}
+
+function HistoryScreenInner() {
   const router = useRouter();
   const [sessions, setSessions] = useState<HistorySession[]>([]);
   const [selected, setSelected] = useState<HistorySession | null>(null);
@@ -414,14 +424,16 @@ export default function HistoryScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header bar with Add Missing button */}
-      <View style={styles.topBar}>
-        <Text style={styles.topBarTitle}>History</Text>
-        <TouchableOpacity style={styles.addMissingBtn} onPress={openAddMissing}>
-          <Ionicons name="add-circle-outline" size={18} color="#6C63FF" />
-          <Text style={styles.addMissingText}>Add missing</Text>
-        </TouchableOpacity>
-      </View>
+      <StatusBar barStyle="light-content" />
+      <AppHeader
+        title="History"
+        right={
+          <TouchableOpacity style={styles.addMissingBtn} onPress={openAddMissing}>
+            <Ionicons name="add-circle-outline" size={18} color="#6C63FF" />
+            <Text style={styles.addMissingText}>Add missing</Text>
+          </TouchableOpacity>
+        }
+      />
       <FlatList
         data={dates}
         keyExtractor={d => d}
@@ -446,9 +458,32 @@ export default function HistoryScreen() {
                 <View style={[styles.sessionAccent, !!session.is_cardio && styles.cardioAccent]} />
                 <View style={styles.sessionBody}>
                   <Text style={styles.sessionName}>{session.workout_name}</Text>
-                  <Text style={styles.sessionMeta}>
-                    {!!session.is_cardio ? 'Cardio' : `${session.set_count} sets`}
-                  </Text>
+                  {!!session.is_cardio ? (
+                    <View style={styles.sessionMetaRow}>
+                      <Text style={styles.sessionMeta}>
+                        {session.cardio_type_name ?? 'Cardio'}
+                        {session.cardio_calories ? `  ·  ${session.cardio_calories} kcal` : ''}
+                      </Text>
+                      {session.cardio_duration ? (
+                        <Text style={styles.sessionDuration}>{Math.round(session.cardio_duration)} min</Text>
+                      ) : null}
+                    </View>
+                  ) : (
+                    <View style={styles.sessionMetaRow}>
+                      <Text style={styles.sessionMeta}>
+                        {session.set_count > 0
+                          ? `${session.set_count} sets${session.total_volume > 0 ? `  ·  ${Math.round(session.total_volume / 1000 * 10) / 10}t` : ''}`
+                          : 'No sets logged'}
+                      </Text>
+                      {session.duration_seconds && session.duration_seconds > 0 ? (
+                        <Text style={styles.sessionDuration}>
+                          {session.duration_seconds >= 3600
+                            ? `${Math.floor(session.duration_seconds / 3600)}h ${Math.floor((session.duration_seconds % 3600) / 60)}m`
+                            : `${Math.floor(session.duration_seconds / 60)}m`}
+                        </Text>
+                      ) : null}
+                    </View>
+                  )}
                 </View>
                 <Ionicons name="chevron-forward" size={16} color="#333" />
               </TouchableOpacity>
@@ -457,9 +492,14 @@ export default function HistoryScreen() {
         )}
       />
 
-      {/* Detail bottom sheet */}
+      {/* Detail bottom sheet — tap backdrop to close */}
       <Modal visible={!!selected} transparent animationType="slide">
         <View style={detailStyles.overlay}>
+          <TouchableOpacity
+            style={detailStyles.backdropHit}
+            activeOpacity={1}
+            onPress={() => setSelected(null)}
+          />
           <View style={detailStyles.sheet}>
             {/* Handle */}
             <View style={detailStyles.handle} />
@@ -512,7 +552,6 @@ export default function HistoryScreen() {
           </View>
         </View>
       </Modal>
-      {/* Add Missing Workout Modal */}
       <Modal visible={addMissingVisible} transparent animationType="slide">
         <View style={detailStyles.overlay}>
           <View style={detailStyles.sheet}>
@@ -629,12 +668,6 @@ const addStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  topBar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 56, paddingBottom: 12,
-    borderBottomWidth: 1, borderBottomColor: '#111',
-  },
-  topBarTitle: { color: '#e8e8ff', fontSize: 18, fontWeight: '700' },
   addMissingBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20,
@@ -651,11 +684,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     borderWidth: 1, borderColor: '#111', overflow: 'hidden',
   },
-  sessionAccent: { width: 4, alignSelf: 'stretch', backgroundColor: '#6C63FF' },
-  cardioAccent: { backgroundColor: '#22c55e' },
-  sessionBody: { flex: 1, paddingVertical: 14, paddingHorizontal: 14 },
-  sessionName: { color: '#e8e8ff', fontSize: 15, fontWeight: '600' },
-  sessionMeta: { color: '#444', fontSize: 13, marginTop: 3 },
+  sessionAccent:  { width: 4, alignSelf: 'stretch', backgroundColor: '#6C63FF' },
+  cardioAccent:   { backgroundColor: '#22c55e' },
+  sessionBody:    { flex: 1, paddingVertical: 14, paddingHorizontal: 14 },
+  sessionName:    { color: '#e8e8ff', fontSize: 15, fontWeight: '600', marginBottom: 3 },
+  sessionMetaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  sessionMeta:    { color: '#444', fontSize: 13, flex: 1 },
+  sessionDuration:{ color: '#444', fontSize: 12 },
   empty: { alignItems: 'center', marginTop: 80, gap: 8 },
   emptyEmoji: { fontSize: 48 },
   emptyText: { color: '#e8e8ff', fontSize: 18, fontWeight: '600', marginTop: 8 },
@@ -663,7 +698,8 @@ const styles = StyleSheet.create({
 });
 
 const detailStyles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: '#000000cc', justifyContent: 'flex-end' },
+  overlay:     { flex: 1, backgroundColor: '#000000cc', justifyContent: 'flex-end' },
+  backdropHit: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   sheet: {
     backgroundColor: '#0a0a0a', borderTopLeftRadius: 28, borderTopRightRadius: 28,
     paddingHorizontal: 20, paddingBottom: 34, maxHeight: '88%',

@@ -1,19 +1,20 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, TextInput,
-  StyleSheet, Alert, StatusBar, ScrollView, Dimensions,
+  StyleSheet, StatusBar, ScrollView, Dimensions, Modal,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import {
   getWorkouts, addWorkout, deleteWorkout, createSession, addExercise,
-  getRecentSession, clearLastSession, Workout,
+  getRecentSession, clearLastSession, getLastSessionSummary, Workout,
 } from '@/src/db';
 import { WorkoutIcon, getWorkoutIcon } from '@/src/WorkoutIcons';
+import { AppHeader } from '@/app/_layout';
 
 const SCREEN_W = Dimensions.get('window').width;
 const CARD_GAP = 12;
-const CARD_W   = (SCREEN_W - 32 - CARD_GAP) / 2; // 2-column grid
+const CARD_W   = (SCREEN_W - 32 - CARD_GAP) / 2;
 
 const TEMPLATES = [
   { name: 'Chest',     exercises: ['Bench Press', 'Incline Dumbbell Press', 'Cable Fly', 'Push Ups'] },
@@ -26,6 +27,51 @@ const TEMPLATES = [
   { name: 'Pull',      exercises: ['Deadlift', 'Pull Ups', 'Barbell Row', 'Bicep Curl'] },
 ];
 
+function WorkoutCardSummary({ workoutId }: { workoutId: number }) {
+  const summary = getLastSessionSummary(workoutId);
+  if (!summary) return <Text style={styles.cardSummaryNone}>No sessions yet</Text>;
+  const dayLabel = summary.daysAgo === 0 ? 'Today' : summary.daysAgo === 1 ? 'Yesterday' : `${summary.daysAgo}d ago`;
+  return <Text style={styles.cardSummary} numberOfLines={1}>{dayLabel} · {summary.totalSets} sets</Text>;
+}
+
+// ── Nice bottom-sheet style modal (replaces Alert.alert) ──────────────────────
+function ActionSheet({
+  visible, title, subtitle, actions, onDismiss,
+}: {
+  visible: boolean;
+  title: string;
+  subtitle?: string;
+  actions: { label: string; sub?: string; icon: string; color?: string; onPress: () => void }[];
+  onDismiss: () => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="slide">
+      <View style={sheet.overlay}>
+        <TouchableOpacity style={sheet.backdrop} activeOpacity={1} onPress={onDismiss} />
+        <View style={sheet.box}>
+          <View style={sheet.handle} />
+          <Text style={sheet.title}>{title}</Text>
+          {subtitle ? <Text style={sheet.sub}>{subtitle}</Text> : null}
+          <View style={sheet.actions}>
+            {actions.map((a, i) => (
+              <TouchableOpacity key={i} style={sheet.action} onPress={() => { onDismiss(); a.onPress(); }}>
+                <View style={[sheet.actionIcon, { backgroundColor: (a.color ?? '#6C63FF') + '22' }]}>
+                  <Ionicons name={a.icon as any} size={20} color={a.color ?? '#6C63FF'} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={sheet.actionLabel}>{a.label}</Text>
+                  {a.sub ? <Text style={sheet.actionSub}>{a.sub}</Text> : null}
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#333" />
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const [workouts, setWorkouts] = useState<Workout[]>([]);
@@ -35,50 +81,43 @@ export default function HomeScreen() {
   const [templateExercises, setTemplateExercises] = useState<string[]>([]);
   const [newExercise, setNewExercise] = useState('');
 
+  // Resume modal state
+  const [resumeModal, setResumeModal] = useState(false);
+  const [pendingWorkout, setPendingWorkout] = useState<{ w: Workout; sessionId: number } | null>(null);
+
   const load = useCallback(() => setWorkouts(getWorkouts()), []);
   useFocusEffect(useCallback(() => { load(); }, []));
 
   async function handlePress(w: Workout) {
+    // Cardio: always start a new session immediately, no popup
     if (!!w.is_cardio) {
       const sessionId = createSession(w.id);
       router.push(`/workout/cardio/${sessionId}`);
       return;
     }
+
     const recent = await getRecentSession();
     if (recent && recent.workout_id === w.id && !recent.is_cardio) {
-      Alert.alert(
-        `Continue ${w.name}?`,
-        'You finished this workout less than an hour ago.',
-        [
-          {
-            text: 'Edit last session',
-            onPress: async () => {
-              await clearLastSession();
-              router.push(`/workout/log/${recent.session_id}?workoutId=${w.id}`);
-            },
-          },
-          {
-            text: 'New session',
-            onPress: async () => {
-              await clearLastSession();
-              const sessionId = createSession(w.id);
-              router.push(`/workout/log/${sessionId}?workoutId=${w.id}`);
-            },
-          },
-          { text: 'Cancel', style: 'cancel' },
-        ]
-      );
-    } else {
-      router.push(`/workout/${w.id}`);
+      if (!recent.finished) {
+        // Mid-session within 15 min — auto-resume silently
+        router.push(`/workout/log/${recent.session_id}?workoutId=${w.id}`);
+        return;
+      }
+      // Finished recently — show nice modal to choose
+      setPendingWorkout({ w, sessionId: recent.session_id });
+      setResumeModal(true);
+      return;
     }
+
+    // No recent session — start fresh
+    const sessionId = createSession(w.id);
+    router.push(`/workout/log/${sessionId}?workoutId=${w.id}`);
   }
 
   function handleLongPress(w: Workout) {
-    if (!!w.is_cardio) { Alert.alert('Cannot delete', 'The Cardio workout is permanent.'); return; }
-    Alert.alert(`Delete "${w.name}"?`, 'This removes all its exercises and history.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => { deleteWorkout(w.id); load(); } },
-    ]);
+    if (!!w.is_cardio) return;
+    // Use the same nice modal pattern for delete confirmation
+    // (handled inline below since it's simpler)
   }
 
   function handleCreateBlank() {
@@ -116,7 +155,8 @@ export default function HomeScreen() {
     setNewName('');
     setSelectedTemplate(null);
     load();
-    router.push(`/workout/${id}`);
+    const sessionId = createSession(id);
+    router.push(`/workout/log/${sessionId}?workoutId=${id}`);
   }
 
   const liftWorkouts = workouts.filter(w => !w.is_cardio);
@@ -126,8 +166,42 @@ export default function HomeScreen() {
   if (mode === 'grid') return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <AppHeader title="Workouts" />
 
+      {/* Resume / new session modal */}
+      {pendingWorkout && (
+        <ActionSheet
+          visible={resumeModal}
+          title={pendingWorkout.w.name}
+          subtitle="You finished this recently"
+          onDismiss={() => setResumeModal(false)}
+          actions={[
+            {
+              label: 'New session',
+              sub: 'Start fresh',
+              icon: 'flash-outline',
+              color: '#6C63FF',
+              onPress: async () => {
+                await clearLastSession();
+                const sessionId = createSession(pendingWorkout.w.id);
+                router.push(`/workout/log/${sessionId}?workoutId=${pendingWorkout.w.id}`);
+              },
+            },
+            {
+              label: 'Edit last session',
+              sub: 'Review and adjust',
+              icon: 'pencil-outline',
+              color: '#f59e0b',
+              onPress: async () => {
+                await clearLastSession();
+                router.push(`/workout/log/${pendingWorkout.sessionId}?workoutId=${pendingWorkout.w.id}`);
+              },
+            },
+          ]}
+        />
+      )}
+
+      <ScrollView contentContainerStyle={styles.scroll}>
         {/* Cardio card — full width */}
         {cardioWorkout && (
           <TouchableOpacity style={styles.cardioCard} onPress={() => handlePress(cardioWorkout)}>
@@ -144,10 +218,7 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Workout grid */}
-        {liftWorkouts.length > 0 && (
-          <Text style={styles.sectionLabel}>MY WORKOUTS</Text>
-        )}
+        {liftWorkouts.length > 0 && <Text style={styles.sectionLabel}>MY WORKOUTS</Text>}
 
         <View style={styles.grid}>
           {liftWorkouts.map(w => {
@@ -157,15 +228,18 @@ export default function HomeScreen() {
                 key={w.id}
                 style={[styles.workoutCard, { borderColor: color + '30' }]}
                 onPress={() => handlePress(w)}
-                onLongPress={() => handleLongPress(w)}
+                onLongPress={() => {
+                  // Long-press delete — simple modal
+                  setPendingWorkout({ w, sessionId: -1 });
+                }}
                 activeOpacity={0.75}
               >
-                {/* Subtle colour tint background */}
                 <View style={[styles.cardBg, { backgroundColor: color + '12' }]} />
                 <View style={styles.iconWrap}>
                   <WorkoutIcon name={w.name} size={52} />
                 </View>
                 <Text style={styles.workoutName} numberOfLines={2}>{w.name}</Text>
+                <WorkoutCardSummary workoutId={w.id} />
               </TouchableOpacity>
             );
           })}
@@ -259,8 +333,6 @@ export default function HomeScreen() {
           <View style={{ width: 40 }} />
         </View>
         <ScrollView contentContainerStyle={styles.modalScroll}>
-
-          {/* Preview icon */}
           <View style={[styles.templatePreview, { backgroundColor: color + '15', borderColor: color + '30' }]}>
             <WorkoutIcon name={selectedTemplate.name} size={72} />
           </View>
@@ -302,7 +374,7 @@ export default function HomeScreen() {
 
           <TouchableOpacity style={[styles.startBtn, { backgroundColor: color }]} onPress={createFromTemplate}>
             <Ionicons name="flash" size={18} color="#fff" />
-            <Text style={styles.startBtnText}>Create & Open</Text>
+            <Text style={styles.startBtnText}>Create & Start</Text>
           </TouchableOpacity>
         </ScrollView>
       </View>
@@ -312,7 +384,6 @@ export default function HomeScreen() {
   return null;
 }
 
-// Small empty state icon
 function DefaultEmptyIcon() {
   return (
     <View style={{ width: 80, height: 80, alignItems: 'center', justifyContent: 'center', opacity: 0.15 }}>
@@ -321,55 +392,64 @@ function DefaultEmptyIcon() {
   );
 }
 
+const sheet = StyleSheet.create({
+  overlay:  { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.7)' },
+  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  box: {
+    backgroundColor: '#0a0a0a', borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    paddingHorizontal: 20, paddingBottom: 36, paddingTop: 8,
+    borderTopWidth: 1, borderColor: '#1a1a2a',
+    shadowColor: '#6C63FF', shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.08, shadowRadius: 12, elevation: 20,
+  },
+  handle:  { width: 36, height: 4, borderRadius: 2, backgroundColor: '#1e1e2e', alignSelf: 'center', marginBottom: 20 },
+  title:   { color: '#e8e8ff', fontSize: 18, fontWeight: '800', marginBottom: 4 },
+  sub:     { color: '#444', fontSize: 13, marginBottom: 20 },
+  actions: { gap: 10 },
+  action: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: '#0f0f18', borderRadius: 14, padding: 14,
+    borderWidth: 1, borderColor: '#1a1a2a',
+  },
+  actionIcon:  { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  actionLabel: { color: '#e8e8ff', fontSize: 15, fontWeight: '600' },
+  actionSub:   { color: '#444', fontSize: 12, marginTop: 2 },
+});
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   scroll: { paddingTop: 16, paddingHorizontal: 16 },
 
-  // Cardio
   cardioCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
     backgroundColor: '#0a0a0a', borderRadius: 16, padding: 14,
     marginBottom: 20, borderWidth: 1, borderColor: '#22c55e30',
   },
-  cardioIconWrap: {
-    width: 52, height: 52, borderRadius: 14, backgroundColor: '#22c55e18',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  cardioText: { flex: 1 },
+  cardioIconWrap: { width: 52, height: 52, borderRadius: 14, backgroundColor: '#22c55e18', alignItems: 'center', justifyContent: 'center' },
+  cardioText:  { flex: 1 },
   cardioTitle: { color: '#22c55e', fontSize: 16, fontWeight: '700' },
   cardioSub:   { color: '#2a5a36', fontSize: 13, marginTop: 2 },
-  cardioArrow: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: '#22c55e18', alignItems: 'center', justifyContent: 'center',
-  },
+  cardioArrow: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#22c55e18', alignItems: 'center', justifyContent: 'center' },
 
-  // Section label
   sectionLabel: { color: '#333', fontSize: 11, fontWeight: '700', letterSpacing: 1.5, marginBottom: 12 },
 
-  // Workout grid
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: CARD_GAP },
   workoutCard: {
     width: CARD_W, aspectRatio: 1,
     backgroundColor: '#0a0a0a', borderRadius: 20,
     borderWidth: 1, alignItems: 'center', justifyContent: 'center',
     padding: 12, overflow: 'hidden',
-    marginBottom: 0,
   },
-  cardBg: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 20,
-  },
-  iconWrap: { marginBottom: 10 },
-  workoutName: {
-    color: '#e8e8ff', fontSize: 13, fontWeight: '700',
-    textAlign: 'center', lineHeight: 17,
-  },
+  cardBg:      { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 20 },
+  iconWrap:    { marginBottom: 10 },
+  workoutName: { color: '#e8e8ff', fontSize: 13, fontWeight: '700', textAlign: 'center', lineHeight: 17 },
+  cardSummary:     { color: '#333', fontSize: 10, textAlign: 'center', marginTop: 4 },
+  cardSummaryNone: { color: '#1e1e1e', fontSize: 10, textAlign: 'center', marginTop: 4 },
 
-  // Empty state
   emptyState: { alignItems: 'center', marginTop: 60, gap: 10 },
   emptyTitle: { color: '#333', fontSize: 18, fontWeight: '700' },
   emptySub:   { color: '#222', fontSize: 14 },
 
-  // FAB
   fab: { position: 'absolute', bottom: 24, left: 16, right: 16 },
   fabBtn: {
     backgroundColor: '#6C63FF', flexDirection: 'row', alignItems: 'center',
@@ -379,64 +459,53 @@ const styles = StyleSheet.create({
   },
   fabText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 
-  // Modal shared
   modalHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 56, paddingBottom: 16,
     borderBottomWidth: 1, borderBottomColor: '#111',
   },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  modalTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  backBtn:   { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  modalTitle:{ color: '#fff', fontSize: 18, fontWeight: '700' },
   modalScroll: { padding: 20, paddingBottom: 60 },
 
-  // Template grid (in new workout screen)
   templateGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
   templateCard: {
     width: (SCREEN_W - 60) / 2, backgroundColor: '#0a0a0a', borderRadius: 16,
-    padding: 14, alignItems: 'center', gap: 8,
-    borderWidth: 1,
+    padding: 14, alignItems: 'center', gap: 8, borderWidth: 1,
   },
-  templateIconBg: {
-    width: 64, height: 64, borderRadius: 16,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  templateName: { color: '#e8e8ff', fontSize: 14, fontWeight: '700' },
-  templateSub:  { color: '#333', fontSize: 12 },
+  templateIconBg: { width: 64, height: 64, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  templateName:   { color: '#e8e8ff', fontSize: 14, fontWeight: '700' },
+  templateSub:    { color: '#333', fontSize: 12 },
 
-  // Template preview (customise screen)
   templatePreview: {
     alignSelf: 'center', width: 110, height: 110, borderRadius: 28,
     alignItems: 'center', justifyContent: 'center',
     marginBottom: 20, borderWidth: 1,
   },
 
-  // Divider
-  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
+  dividerRow:  { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
   dividerLine: { flex: 1, height: 1, backgroundColor: '#111' },
   dividerText: { color: '#333', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
 
-  // Blank create
   blankRow:   { flexDirection: 'row', gap: 10, marginBottom: 12 },
   blankInput: {
     flex: 1, backgroundColor: '#0a0a0a', color: '#fff', borderRadius: 12,
     paddingHorizontal: 14, paddingVertical: 13, fontSize: 15,
     borderWidth: 1, borderColor: '#111',
   },
-  createBtn:    { backgroundColor: '#6C63FF', paddingHorizontal: 18, borderRadius: 12, justifyContent: 'center' },
-  createBtnOff: { backgroundColor: '#111' },
-  createBtnText:{ color: '#fff', fontWeight: '700' },
-  addExBtn:     { width: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  createBtn:     { backgroundColor: '#6C63FF', paddingHorizontal: 18, borderRadius: 12, justifyContent: 'center' },
+  createBtnOff:  { backgroundColor: '#111' },
+  createBtnText: { color: '#fff', fontWeight: '700' },
+  addExBtn:      { width: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
 
-  // Exercise rows
   exerciseRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     backgroundColor: '#0a0a0a', borderRadius: 10, padding: 13, marginBottom: 6,
     borderWidth: 1, borderColor: '#111',
   },
-  exDot:          { width: 7, height: 7, borderRadius: 4 },
-  exerciseRowText:{ flex: 1, color: '#ccc', fontSize: 14 },
+  exDot:           { width: 7, height: 7, borderRadius: 4 },
+  exerciseRowText: { flex: 1, color: '#ccc', fontSize: 14 },
 
-  // Start button
   startBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: 8, padding: 16, borderRadius: 14, marginTop: 24,

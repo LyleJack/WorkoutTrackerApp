@@ -13,6 +13,7 @@
       "backgroundColor": "#0f0f1a"
     },
     "android": {
+      "package": "com.lylejack.workouttracker",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0f0f1a"
@@ -34,6 +35,12 @@
           "sounds": []
         }
       ]
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ed3c1a03-6ee3-41fa-a7db-6bcd107ea606"
+      }
+    }
   }
 }
