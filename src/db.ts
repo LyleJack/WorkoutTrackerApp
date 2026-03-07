@@ -83,12 +83,17 @@ export function initDB() {
   if (!cardio) {
     db.runSync("INSERT INTO workouts (name, is_cardio) VALUES ('Cardio', 1)");
   }
+
+  // Migration: add is_hidden to exercises if missing
+  try {
+    db.execSync('ALTER TABLE exercises ADD COLUMN is_hidden INTEGER DEFAULT 0');
+  } catch {}
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type Workout     = { id: number; name: string; is_cardio: number; created_at: string };
-export type Exercise    = { id: number; workout_id: number; name: string; sort_order: number };
+export type Exercise    = { id: number; workout_id: number; name: string; sort_order: number; is_hidden: number };
 export type Session     = { id: number; workout_id: number; date: string; notes?: string; duration_seconds?: number };
 export type Set         = { id: number; session_id: number; exercise_id: number; weight: number; reps: number; set_number: number; comment?: string; duration_seconds?: number };
 export type CardioType  = { id: number; name: string };
@@ -120,7 +125,22 @@ export function getCardioWorkout(): Workout {
 // ─── Exercises ────────────────────────────────────────────────────────────────
 
 export function getExercises(workoutId: number): Exercise[] {
-  return db.getAllSync('SELECT * FROM exercises WHERE workout_id = ? ORDER BY sort_order ASC', [workoutId]) as Exercise[];
+  return db.getAllSync(
+    'SELECT * FROM exercises WHERE workout_id = ? AND (is_hidden IS NULL OR is_hidden = 0) ORDER BY sort_order ASC',
+    [workoutId]
+  ) as Exercise[];
+}
+export function getHiddenExercises(workoutId: number): Exercise[] {
+  return db.getAllSync(
+    'SELECT * FROM exercises WHERE workout_id = ? AND is_hidden = 1 ORDER BY name ASC',
+    [workoutId]
+  ) as Exercise[];
+}
+export function hideExercise(id: number) {
+  db.runSync('UPDATE exercises SET is_hidden = 1 WHERE id = ?', [id]);
+}
+export function unhideExercise(id: number) {
+  db.runSync('UPDATE exercises SET is_hidden = 0 WHERE id = ?', [id]);
 }
 export function addExercise(workoutId: number, name: string): number {
   const count = (db.getFirstSync('SELECT COUNT(*) as c FROM exercises WHERE workout_id = ?', [workoutId]) as any).c;
@@ -299,15 +319,16 @@ export function getMostPopularWorkouts(period: 'month' | 'year'): WorkoutCount[]
   `) as WorkoutCount[];
 }
 
-export type ProgressPoint = { date: string; weight: number; volume: number; max_reps: number };
+export type ProgressPoint = { date: string; weight: number; volume: number; max_reps: number; max_duration_seconds: number | null };
 
 // Returns progress for all exercises matching this name (across all workouts)
 export function getExerciseProgress(exerciseName: string): ProgressPoint[] {
   return db.getAllSync(`
     SELECT s.date,
-           MAX(st.weight)           as weight,
-           SUM(st.weight * st.reps) as volume,
-           MAX(st.reps)             as max_reps
+           MAX(st.weight)                                    as weight,
+           SUM(st.weight * st.reps)                         as volume,
+           MAX(st.reps)                                      as max_reps,
+           MAX(COALESCE(st.duration_seconds, 0))             as max_duration_seconds
     FROM sets st
     JOIN exercises e ON e.id = st.exercise_id
     JOIN sessions  s ON s.id = st.session_id
@@ -330,6 +351,32 @@ export function getHistoricalExerciseNames(workoutName: string): string[] {
     ORDER BY e.name ASC
   `, [workoutName]) as { name: string }[];
   return rows.map(r => r.name);
+}
+
+export type CardioProgressPoint = {
+  date: string;
+  cardio_type_name: string;
+  calories_per_min: number | null;
+  duration_minutes: number;
+  calories: number | null;
+  distance_km: number | null;
+};
+// Returns one row per cardio session, grouped by type then date
+export function getCardioProgress(): CardioProgressPoint[] {
+  return db.getAllSync(`
+    SELECT s.date,
+           ct.name                                              as cardio_type_name,
+           cl.duration_minutes,
+           cl.calories,
+           cl.distance_km,
+           CASE WHEN cl.duration_minutes > 0 AND cl.calories IS NOT NULL
+                THEN ROUND(CAST(cl.calories AS REAL) / cl.duration_minutes, 2)
+                ELSE NULL END                                   as calories_per_min
+    FROM cardio_logs  cl
+    JOIN sessions     s  ON s.id  = cl.session_id
+    JOIN cardio_types ct ON ct.id = cl.cardio_type_id
+    ORDER BY ct.name ASC, s.date ASC
+  `) as CardioProgressPoint[];
 }
 
 // Also keep a by-id variant for internal use
@@ -432,7 +479,7 @@ export function exportAllData() {
 export function importAllData(data: any) {
   db.execSync('DELETE FROM cardio_logs; DELETE FROM sets; DELETE FROM sessions; DELETE FROM exercises; DELETE FROM workouts; DELETE FROM cardio_types;');
   for (const w  of (data.workouts     ?? []) as Workout[])    db.runSync('INSERT INTO workouts    (id,name,is_cardio,created_at) VALUES (?,?,?,?)', [w.id, w.name, w.is_cardio??0, w.created_at]);
-  for (const e  of (data.exercises    ?? []) as Exercise[])   db.runSync('INSERT INTO exercises   (id,workout_id,name,sort_order) VALUES (?,?,?,?)', [e.id, e.workout_id, e.name, e.sort_order]);
+  for (const e  of (data.exercises    ?? []) as Exercise[])   db.runSync('INSERT INTO exercises   (id,workout_id,name,sort_order,is_hidden) VALUES (?,?,?,?,?)', [e.id, e.workout_id, e.name, e.sort_order, (e as any).is_hidden??0]);
   for (const s  of (data.sessions     ?? []) as Session[])    db.runSync('INSERT INTO sessions    (id,workout_id,date,created_at,notes,duration_seconds) VALUES (?,?,?,?,?,?)', [s.id, s.workout_id, s.date, (s as any).created_at??null, s.notes??null, s.duration_seconds??null]);
   for (const st of (data.sets         ?? []) as Set[])        db.runSync('INSERT INTO sets        (id,session_id,exercise_id,weight,reps,set_number,comment,duration_seconds) VALUES (?,?,?,?,?,?,?,?)', [st.id, st.session_id, st.exercise_id, st.weight, st.reps, st.set_number, st.comment??null, (st as any).duration_seconds??null]);
   for (const ct of (data.cardio_types ?? []) as CardioType[]) db.runSync('INSERT OR IGNORE INTO cardio_types (id,name) VALUES (?,?)', [ct.id, ct.name]);

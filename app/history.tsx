@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, TextInput,
-  StyleSheet, Alert, Modal, ScrollView, StatusBar,
+  StyleSheet, Alert, Modal, ScrollView,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { AppHeader } from '@/app/_layout';
@@ -332,8 +332,14 @@ function HistoryScreenInner() {
     return Object.entries(byEx).map(([exName, sets]) => (
       <View key={exName} style={detailStyles.exBlock}>
         <Text style={detailStyles.exName}>{exName}</Text>
-        {sets.map(s => (
-          editingSetId === s.id ? (
+        {sets.map(s => {
+          const durSecs = (s as any).duration_seconds as number | undefined;
+          const durLabel = durSecs && durSecs > 0
+            ? (durSecs >= 60
+                ? `${Math.floor(durSecs / 60)}m${durSecs % 60 > 0 ? ` ${durSecs % 60}s` : ''}`
+                : `${durSecs}s`)
+            : null;
+          return editingSetId === s.id ? (
             <View key={s.id} style={detailStyles.editRow}>
               <TextInput style={detailStyles.editInput} value={editWeight} onChangeText={setEditWeight}
                 keyboardType="decimal-pad" placeholder="kg" placeholderTextColor="#555" />
@@ -351,7 +357,10 @@ function HistoryScreenInner() {
           ) : (
             <View key={s.id} style={detailStyles.setRow}>
               <Text style={detailStyles.setNum}>{s.set_number}</Text>
-              <Text style={detailStyles.setVal}>{s.weight}kg × {s.reps}</Text>
+              <Text style={detailStyles.setVal}>
+                {s.weight > 0 ? `${s.weight} kg` : 'BW'}
+                {durLabel ? `  ·  ${durLabel}` : `  ×  ${s.reps}`}
+              </Text>
               {s.comment ? <Text style={detailStyles.setNote}>{s.comment}</Text> : null}
               <View style={detailStyles.setActions}>
                 <TouchableOpacity onPress={() => startEditSet(s)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -362,8 +371,8 @@ function HistoryScreenInner() {
                 </TouchableOpacity>
               </View>
             </View>
-          )
-        ))}
+          );
+        })}
       </View>
     ));
   }
@@ -424,16 +433,7 @@ function HistoryScreenInner() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
-      <AppHeader
-        title="History"
-        right={
-          <TouchableOpacity style={styles.addMissingBtn} onPress={openAddMissing}>
-            <Ionicons name="add-circle-outline" size={18} color="#6C63FF" />
-            <Text style={styles.addMissingText}>Add missing</Text>
-          </TouchableOpacity>
-        }
-      />
+      <AppHeader title="History" />
       <FlatList
         data={dates}
         keyExtractor={d => d}
@@ -491,6 +491,11 @@ function HistoryScreenInner() {
           </View>
         )}
       />
+
+      {/* Floating "Add missing session" button */}
+      <TouchableOpacity style={styles.fab} onPress={openAddMissing} activeOpacity={0.85}>
+        <Ionicons name="add" size={26} color="#fff" />
+      </TouchableOpacity>
 
       {/* Detail bottom sheet — tap backdrop to close */}
       <Modal visible={!!selected} transparent animationType="slide">
@@ -668,12 +673,22 @@ const addStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  addMissingBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20,
-    borderWidth: 1, borderColor: '#1a1a2a',
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 28,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#6C63FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 6,
+    shadowColor: '#6C63FF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
   },
-  addMissingText: { color: '#6C63FF', fontSize: 13, fontWeight: '600' },
   list: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40 },
   dateHeader: {
     color: '#444', fontSize: 11, fontWeight: '700', letterSpacing: 1.5,

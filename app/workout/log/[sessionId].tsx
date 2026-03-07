@@ -12,7 +12,7 @@ import Constants from 'expo-constants';
 import {
   getExercises, addSet, getSetsForSession, deleteSet,
   getLastSetForExercise, saveLastSessionTime, saveSessionDuration, getWorkouts,
-  addExercise, reorderExercises,
+  addExercise, reorderExercises, hideExercise, unhideExercise, getHiddenExercises,
   Exercise, Set,
 } from '@/src/db';
 import { ErrorBoundary } from '@/src/ErrorBoundary';
@@ -75,8 +75,14 @@ function ConfirmModal({
 // ─── Add Exercise modal ────────────────────────────────────────────────────────
 
 function AddExerciseModal({
-  visible, onAdd, onDismiss,
-}: { visible: boolean; onAdd: (name: string) => void; onDismiss: () => void }) {
+  visible, onAdd, onDismiss, hiddenExercises, onUnhide,
+}: {
+  visible: boolean;
+  onAdd: (name: string) => void;
+  onDismiss: () => void;
+  hiddenExercises: { id: number; name: string }[];
+  onUnhide: (id: number) => void;
+}) {
   const [text, setText] = useState('');
   function submit() {
     const t = text.trim();
@@ -91,9 +97,29 @@ function AddExerciseModal({
         <View style={ae.box}>
           <View style={ae.handle} />
           <Text style={ae.title}>Add Exercise</Text>
+
+          {/* Hidden exercises as quick-add chips */}
+          {hiddenExercises.length > 0 && (
+            <>
+              <Text style={ae.chipsLabel}>Hidden exercises</Text>
+              <View style={ae.chips}>
+                {hiddenExercises.map(e => (
+                  <TouchableOpacity
+                    key={e.id}
+                    style={ae.chip}
+                    onPress={() => { onUnhide(e.id); onDismiss(); }}
+                  >
+                    <Ionicons name="eye-outline" size={13} color="#6C63FF" />
+                    <Text style={ae.chipText}>{e.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
+
           <TextInput
             style={ae.input}
-            placeholder="Exercise name..."
+            placeholder="New exercise name…"
             placeholderTextColor="#444"
             value={text}
             onChangeText={setText}
@@ -453,6 +479,7 @@ function LogScreenInner() {
 
   // Duration mode (plank etc.) — keyed by exercise id, persisted
   const [durationModes, setDurationModes] = useState<Record<number, boolean>>({});
+  const [hiddenExercises, setHiddenExercises] = useState<Exercise[]>([]);
 
   // Modals
   const [addExVisible,    setAddExVisible]    = useState(false);
@@ -475,6 +502,8 @@ function LogScreenInner() {
 
   const load = useCallback(() => {
     const exercises = getExercises(Number(workoutId));
+    const hidden    = getHiddenExercises(Number(workoutId));
+    setHiddenExercises(hidden);
     const sets      = getSetsForSession(Number(sessionId));
     setData(exercises.map(e => ({
       exercise: e,
@@ -602,6 +631,17 @@ function LogScreenInner() {
     setAddExVisible(false);
   }
 
+  function handleHideExercise(exerciseId: number) {
+    hideExercise(exerciseId);
+    setDragging(null);
+    load();
+  }
+
+  function handleUnhideExercise(exerciseId: number) {
+    unhideExercise(exerciseId);
+    load();
+  }
+
   // Simple reorder: tap drag handle → mark as dragging. Tap another item → swap.
   function handleDragStart(exerciseId: number) {
     if (dragging === null) {
@@ -652,6 +692,8 @@ function LogScreenInner() {
         visible={addExVisible}
         onAdd={handleAddExercise}
         onDismiss={() => setAddExVisible(false)}
+        hiddenExercises={hiddenExercises}
+        onUnhide={handleUnhideExercise}
       />
 
       {/* Drag hint banner */}
@@ -719,6 +761,15 @@ function LogScreenInner() {
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
                     <Ionicons name="reorder-three-outline" size={20} color={isDragging ? '#6C63FF' : '#2a2a2a'} />
+                  </TouchableOpacity>
+
+                  {/* Hide button */}
+                  <TouchableOpacity
+                    style={styles.hideBtn}
+                    onPress={() => handleHideExercise(exercise.id)}
+                    hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+                  >
+                    <Ionicons name="eye-off-outline" size={16} color="#222" />
                   </TouchableOpacity>
 
                   {/* Badge */}
@@ -895,8 +946,16 @@ const ae = StyleSheet.create({
     borderTopWidth: 1, borderColor: '#1a1a28',
     shadowColor: '#6C63FF', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.08, shadowRadius: 12, elevation: 20,
   },
-  handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#1e1e2e', alignSelf: 'center', marginBottom: 20 },
-  title:  { color: '#e8e8ff', fontSize: 18, fontWeight: '700', marginBottom: 16 },
+  handle:     { width: 36, height: 4, borderRadius: 2, backgroundColor: '#1e1e2e', alignSelf: 'center', marginBottom: 20 },
+  title:      { color: '#e8e8ff', fontSize: 18, fontWeight: '700', marginBottom: 12 },
+  chipsLabel: { color: '#444', fontSize: 11, fontWeight: '700', letterSpacing: 0.5, marginBottom: 8 },
+  chips:      { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: '#0d0d1f', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7,
+    borderWidth: 1, borderColor: '#6C63FF33',
+  },
+  chipText:   { color: '#6C63FF', fontSize: 13, fontWeight: '600' },
   input: {
     backgroundColor: '#000', color: '#e8e8ff', borderRadius: 12,
     paddingHorizontal: 14, paddingVertical: 14, fontSize: 16,
@@ -1023,6 +1082,7 @@ const styles = StyleSheet.create({
 
   dragHandle:       { padding: 4, marginRight: -2 },
   dragHandleActive: { opacity: 1 },
+  hideBtn:          { padding: 4, marginRight: 2 },
 
   badge:        { width: 22, height: 22, borderRadius: 11, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
   badgeHasSets: { backgroundColor: '#111', borderWidth: 1, borderColor: '#2a2a2a' },
