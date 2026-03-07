@@ -3,7 +3,7 @@ import {
   View, Text, FlatList, TouchableOpacity, TextInput,
   StyleSheet, Alert, Modal, ScrollView,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import {
   getHistory, getSessionDetails, deleteSession,
@@ -15,7 +15,122 @@ import {
 
 type Detail = ReturnType<typeof getSessionDetails>;
 
+
+// ─── Inline Calendar ──────────────────────────────────────────────────────────
+
+const DAYS   = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+const MONTHS = ['January','February','March','April','May','June',
+                'July','August','September','October','November','December'];
+
+function InlineCalendar({ year, month, selectedDate, onSelectDate, onChangeMonth }: {
+  year: number; month: number; selectedDate: string;
+  onSelectDate: (d: string) => void;
+  onChangeMonth: (y: number, m: number) => void;
+}) {
+  const today = new Date();
+  today.setHours(0,0,0,0);
+
+  function prevMonth() {
+    if (month === 0) onChangeMonth(year - 1, 11);
+    else onChangeMonth(year, month - 1);
+  }
+  function nextMonth() {
+    // Don't allow navigating past current month
+    if (year === today.getFullYear() && month === today.getMonth()) return;
+    if (month === 11) onChangeMonth(year + 1, 0);
+    else onChangeMonth(year, month + 1);
+  }
+
+  // Build grid
+  const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: (number | null)[] = [
+    ...Array(firstDay).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  // Pad to complete last row
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const isAtCurrentMonth = year === today.getFullYear() && month === today.getMonth();
+
+  function dateStr(day: number) {
+    return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+
+  return (
+    <View style={calStyles.container}>
+      {/* Month navigation */}
+      <View style={calStyles.header}>
+        <TouchableOpacity onPress={prevMonth} style={calStyles.navBtn}>
+          <Ionicons name="chevron-back" size={18} color="#aaa" />
+        </TouchableOpacity>
+        <Text style={calStyles.monthTitle}>{MONTHS[month]} {year}</Text>
+        <TouchableOpacity
+          onPress={nextMonth}
+          style={[calStyles.navBtn, isAtCurrentMonth && calStyles.navBtnDisabled]}
+        >
+          <Ionicons name="chevron-forward" size={18} color={isAtCurrentMonth ? '#222' : '#aaa'} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Day headers */}
+      <View style={calStyles.weekRow}>
+        {DAYS.map(d => (
+          <Text key={d} style={calStyles.dayLabel}>{d}</Text>
+        ))}
+      </View>
+
+      {/* Grid */}
+      {Array.from({ length: cells.length / 7 }, (_, row) => (
+        <View key={row} style={calStyles.weekRow}>
+          {cells.slice(row * 7, row * 7 + 7).map((day, col) => {
+            if (!day) return <View key={col} style={calStyles.cell} />;
+            const ds   = dateStr(day);
+            const cellDate = new Date(year, month, day);
+            const isFuture = cellDate > today;
+            const isSel    = ds === selectedDate;
+            const isToday  = cellDate.getTime() === today.getTime();
+            return (
+              <TouchableOpacity
+                key={col}
+                style={[
+                  calStyles.cell,
+                  isSel    && calStyles.cellSelected,
+                  isToday  && !isSel && calStyles.cellToday,
+                  isFuture && calStyles.cellDisabled,
+                ]}
+                onPress={() => { if (!isFuture) onSelectDate(ds); }}
+                disabled={isFuture}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  calStyles.cellText,
+                  isSel    && calStyles.cellTextSelected,
+                  isToday  && !isSel && calStyles.cellTextToday,
+                  isFuture && calStyles.cellTextDisabled,
+                ]}>
+                  {day}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ))}
+
+      {/* Selected date label */}
+      {selectedDate ? (
+        <Text style={calStyles.selectedLabel}>
+          Selected: {new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-GB', {
+            weekday: 'long', day: 'numeric', month: 'long',
+          })}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 export default function HistoryScreen() {
+  const router = useRouter();
   const [sessions, setSessions] = useState<HistorySession[]>([]);
   const [selected, setSelected] = useState<HistorySession | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -37,6 +152,8 @@ export default function HistoryScreen() {
   const [missingWorkouts, setMissingWorkouts] = useState<Workout[]>([]);
   const [missingSelectedWorkout, setMissingSelectedWorkout] = useState<Workout | null>(null);
   const [missingStep, setMissingStep] = useState<'date' | 'workout'>('date');
+  const [calYear, setCalYear] = useState(new Date().getFullYear());
+  const [calMonth, setCalMonth] = useState(new Date().getMonth()); // 0-indexed
 
   const load = useCallback(() => setSessions(getHistory()), []);
   useFocusEffect(load);
@@ -134,10 +251,11 @@ export default function HistoryScreen() {
     const ws = getWorkouts();
     setMissingWorkouts(ws);
     setMissingSelectedWorkout(ws.find(w => !w.is_cardio) ?? null);
-    // Default to yesterday
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     setMissingDate(yesterday.toISOString().slice(0, 10));
+    setCalYear(yesterday.getFullYear());
+    setCalMonth(yesterday.getMonth());
     setMissingStep('date');
     setAddMissingVisible(true);
   }
@@ -165,7 +283,37 @@ export default function HistoryScreen() {
 
   // Group sets by exercise for the detail view
   function renderSets() {
-    if (!detail) return null;
+    if (!detail || !selected) return null;
+
+    // If no sets logged at all, show exercises as empty rows + button to go log them
+    if (detail.sets.length === 0) {
+      const exercises = getExercises(selected.workout_id);
+      return (
+        <View>
+          {exercises.length === 0 ? (
+            <Text style={detailStyles.emptyNote}>No exercises in this workout.</Text>
+          ) : (
+            exercises.map(e => (
+              <View key={e.id} style={detailStyles.exBlock}>
+                <Text style={detailStyles.exName}>{e.name}</Text>
+                <Text style={detailStyles.emptyNote}>No sets logged</Text>
+              </View>
+            ))
+          )}
+          <TouchableOpacity
+            style={detailStyles.logBtn}
+            onPress={() => {
+              setSelected(null);
+              router.push(`/workout/log/${selected.session_id}?workoutId=${selected.workout_id}`);
+            }}
+          >
+            <Ionicons name="add-circle-outline" size={16} color="#6C63FF" />
+            <Text style={detailStyles.logBtnText}>Log sets for this session</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
     const byEx: Record<string, (Set & { exercise_name: string })[]> = {};
     detail.sets.forEach(s => {
       if (!byEx[s.exercise_name]) byEx[s.exercise_name] = [];
@@ -376,17 +524,14 @@ export default function HistoryScreen() {
               </TouchableOpacity>
             </View>
 
-            <Text style={addStyles.label}>Date</Text>
-            <TextInput
-              style={addStyles.dateInput}
-              value={missingDate}
-              onChangeText={setMissingDate}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor="#444"
-              keyboardType="numbers-and-punctuation"
+            <InlineCalendar
+              year={calYear} month={calMonth}
+              selectedDate={missingDate}
+              onSelectDate={setMissingDate}
+              onChangeMonth={(y, m) => { setCalYear(y); setCalMonth(m); }}
             />
 
-            <Text style={[addStyles.label, { marginTop: 16 }]}>Workout</Text>
+            <Text style={[addStyles.label, { marginTop: 14 }]}>Workout</Text>
             <ScrollView style={addStyles.workoutList} showsVerticalScrollIndicator={false}>
               {missingWorkouts.map(w => (
                 <TouchableOpacity
@@ -421,17 +566,54 @@ export default function HistoryScreen() {
   );
 }
 
+const calStyles = StyleSheet.create({
+  container: {
+    backgroundColor: '#0a0a0a', borderRadius: 14, padding: 12,
+    marginBottom: 6, borderWidth: 1, borderColor: '#111',
+  },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  navBtn: {
+    width: 34, height: 34, borderRadius: 17, backgroundColor: '#111',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  navBtnDisabled: { opacity: 0.3 },
+  monthTitle: { color: '#e8e8ff', fontSize: 15, fontWeight: '700' },
+  weekRow: { flexDirection: 'row', marginBottom: 2 },
+  dayLabel: {
+    flex: 1, textAlign: 'center', color: '#333',
+    fontSize: 11, fontWeight: '700', letterSpacing: 0.5, paddingVertical: 4,
+  },
+  cell: {
+    flex: 1, aspectRatio: 1, alignItems: 'center', justifyContent: 'center',
+    borderRadius: 8, margin: 1,
+  },
+  cellSelected: { backgroundColor: '#6C63FF' },
+  cellToday:   { backgroundColor: '#111', borderWidth: 1, borderColor: '#6C63FF' },
+  cellDisabled:{ opacity: 0.15 },
+  cellText:    { color: '#ccc', fontSize: 13, fontWeight: '500' },
+  cellTextSelected: { color: '#fff', fontWeight: '700' },
+  cellTextToday:    { color: '#6C63FF', fontWeight: '700' },
+  cellTextDisabled: { color: '#333' },
+  selectedLabel: {
+    textAlign: 'center', color: '#6C63FF', fontSize: 12,
+    fontWeight: '600', marginTop: 8,
+  },
+});
+
 const addStyles = StyleSheet.create({
-  label: { color: '#555', fontSize: 12, fontWeight: '700', letterSpacing: 0.5, marginBottom: 8 },
+  label: { color: '#555', fontSize: 12, fontWeight: '700', letterSpacing: 0.5, marginBottom: 8, marginTop: 0 },
   dateInput: {
-    backgroundColor: '#0a0a12', color: '#e8e8ff', borderRadius: 10,
-    padding: 13, fontSize: 16, borderWidth: 1, borderColor: '#2a2a4a', fontVariant: ['tabular-nums'],
+    backgroundColor: '#000', color: '#e8e8ff', borderRadius: 10,
+    padding: 13, fontSize: 16, borderWidth: 1, borderColor: '#1a1a2a', fontVariant: ['tabular-nums'],
   },
   workoutList: { maxHeight: 200, marginBottom: 4 },
   workoutOption: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    padding: 13, borderRadius: 10, marginBottom: 6, backgroundColor: '#0a0a12',
-    borderWidth: 1, borderColor: '#1e1e32',
+    padding: 13, borderRadius: 10, marginBottom: 6, backgroundColor: '#000',
+    borderWidth: 1, borderColor: '#111',
   },
   workoutOptionSelected: { borderColor: '#6C63FF', backgroundColor: '#110d1f' },
   workoutOptionText: { color: '#888', fontSize: 15 },
@@ -441,22 +623,22 @@ const addStyles = StyleSheet.create({
     backgroundColor: '#6C63FF', flexDirection: 'row', alignItems: 'center',
     justifyContent: 'center', gap: 8, padding: 14, borderRadius: 12,
   },
-  confirmBtnDisabled: { backgroundColor: '#2a2a4a' },
+  confirmBtnDisabled: { backgroundColor: '#1a1a2a' },
   confirmBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 });
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0a0a12' },
+  container: { flex: 1, backgroundColor: '#000' },
   topBar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 56, paddingBottom: 12,
-    borderBottomWidth: 1, borderBottomColor: '#1e1e32',
+    borderBottomWidth: 1, borderBottomColor: '#111',
   },
   topBarTitle: { color: '#e8e8ff', fontSize: 18, fontWeight: '700' },
   addMissingBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20,
-    borderWidth: 1, borderColor: '#2a2a4a',
+    borderWidth: 1, borderColor: '#1a1a2a',
   },
   addMissingText: { color: '#6C63FF', fontSize: 13, fontWeight: '600' },
   list: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40 },
@@ -465,9 +647,9 @@ const styles = StyleSheet.create({
     marginBottom: 8, marginTop: 16,
   },
   sessionCard: {
-    backgroundColor: '#13131f', borderRadius: 14, marginBottom: 8,
+    backgroundColor: '#0a0a0a', borderRadius: 14, marginBottom: 8,
     flexDirection: 'row', alignItems: 'center',
-    borderWidth: 1, borderColor: '#1e1e32', overflow: 'hidden',
+    borderWidth: 1, borderColor: '#111', overflow: 'hidden',
   },
   sessionAccent: { width: 4, alignSelf: 'stretch', backgroundColor: '#6C63FF' },
   cardioAccent: { backgroundColor: '#22c55e' },
@@ -483,26 +665,26 @@ const styles = StyleSheet.create({
 const detailStyles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: '#000000cc', justifyContent: 'flex-end' },
   sheet: {
-    backgroundColor: '#13131f', borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    backgroundColor: '#0a0a0a', borderTopLeftRadius: 28, borderTopRightRadius: 28,
     paddingHorizontal: 20, paddingBottom: 34, maxHeight: '88%',
   },
   handle: {
-    width: 40, height: 4, borderRadius: 2, backgroundColor: '#2a2a4a',
+    width: 40, height: 4, borderRadius: 2, backgroundColor: '#1a1a2a',
     alignSelf: 'center', marginTop: 12, marginBottom: 8,
   },
   sheetHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16 },
   sheetTitle: { color: '#e8e8ff', fontSize: 20, fontWeight: '700' },
   sheetDate: { color: '#555', fontSize: 14, marginTop: 3 },
   closeBtn: {
-    width: 36, height: 36, borderRadius: 18, backgroundColor: '#1e1e32',
+    width: 36, height: 36, borderRadius: 18, backgroundColor: '#111',
     alignItems: 'center', justifyContent: 'center',
   },
   content: { maxHeight: 440 },
 
   // Notes
   notesBlock: {
-    backgroundColor: '#0a0a12', borderRadius: 12, padding: 12, marginBottom: 14,
-    borderWidth: 1, borderColor: '#1e1e32',
+    backgroundColor: '#000', borderRadius: 12, padding: 12, marginBottom: 14,
+    borderWidth: 1, borderColor: '#111',
   },
   notesRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   notesText: { flex: 1, color: '#888', fontSize: 14 },
@@ -514,7 +696,7 @@ const detailStyles = StyleSheet.create({
 
   // Exercises / sets
   exBlock: {
-    marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#1e1e32',
+    marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#111',
   },
   exName: { color: '#6C63FF', fontSize: 14, fontWeight: '700', marginBottom: 8 },
   setRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 5 },
@@ -526,12 +708,12 @@ const detailStyles = StyleSheet.create({
   // Edit row
   editRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 },
   editInput: {
-    flex: 1, backgroundColor: '#0a0a12', color: '#fff', borderRadius: 8,
-    padding: 8, fontSize: 14, borderWidth: 1, borderColor: '#2a2a4a', textAlign: 'center',
+    flex: 1, backgroundColor: '#000', color: '#fff', borderRadius: 8,
+    padding: 8, fontSize: 14, borderWidth: 1, borderColor: '#1a1a2a', textAlign: 'center',
   },
   editInputFull: {
-    backgroundColor: '#0a0a12', color: '#fff', borderRadius: 8,
-    padding: 10, fontSize: 14, borderWidth: 1, borderColor: '#2a2a4a',
+    backgroundColor: '#000', color: '#fff', borderRadius: 8,
+    padding: 10, fontSize: 14, borderWidth: 1, borderColor: '#1a1a2a',
   },
   saveBtn: { padding: 6 },
 
@@ -548,7 +730,7 @@ const detailStyles = StyleSheet.create({
   saveBtnText: { color: '#fff', fontWeight: '700' },
   cancelBtnFull: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#1e1e32', padding: 11, borderRadius: 10,
+    backgroundColor: '#111', padding: 11, borderRadius: 10,
   },
   cancelBtnText: { color: '#888', fontWeight: '600' },
 
@@ -559,4 +741,11 @@ const detailStyles = StyleSheet.create({
     borderWidth: 1, borderColor: '#2a1111',
   },
   deleteText: { color: '#ff4444', fontWeight: '600' },
+  emptyNote: { color: '#333', fontSize: 13, fontStyle: 'italic', paddingVertical: 6 },
+  logBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, padding: 13, borderRadius: 12, marginTop: 8,
+    borderWidth: 1, borderColor: '#6C63FF22', backgroundColor: '#0d0d1f',
+  },
+  logBtnText: { color: '#6C63FF', fontWeight: '600', fontSize: 14 },
 });

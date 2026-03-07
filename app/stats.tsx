@@ -42,7 +42,7 @@ export default function StatsScreen() {
   const chartData = popular.map((w, i) => ({
     value: w.count,
     label: w.name.length > 7 ? w.name.slice(0, 7) + '…' : w.name,
-    frontColor: i === 0 ? '#6C63FF' : '#2a2a4a',
+    frontColor: i === 0 ? '#6C63FF' : '#1a1a2a',
     gradientColor: i === 0 ? '#9d97ff' : '#3a3a6a',
   }));
 
@@ -153,21 +153,21 @@ export default function StatsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0a0a12' },
+  container: { flex: 1, backgroundColor: '#000' },
   scroll: { padding: 16, paddingBottom: 50 },
 
   // Streak
   streakCard: {
-    backgroundColor: '#13131f', borderRadius: 20, padding: 20, marginBottom: 14,
+    backgroundColor: '#0a0a0a', borderRadius: 20, padding: 20, marginBottom: 14,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    borderWidth: 1, borderColor: '#1e1e32',
+    borderWidth: 1, borderColor: '#111',
   },
   streakLeft: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   streakFire: { fontSize: 44 },
   streakNum: { color: '#fff', fontSize: 56, fontWeight: '900', lineHeight: 60 },
   streakLabel: { color: '#555', fontSize: 15 },
   weekDots: { alignItems: 'center', gap: 6 },
-  weekDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#1e1e32' },
+  weekDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#111' },
   weekDotFilled: { backgroundColor: '#6C63FF' },
   weekLabel: { color: '#444', fontSize: 11, marginTop: 4 },
 
@@ -187,18 +187,18 @@ const styles = StyleSheet.create({
 
   // Section
   section: {
-    backgroundColor: '#13131f', borderRadius: 18, padding: 18,
-    marginBottom: 14, borderWidth: 1, borderColor: '#1e1e32',
+    backgroundColor: '#0a0a0a', borderRadius: 18, padding: 18,
+    marginBottom: 14, borderWidth: 1, borderColor: '#111',
   },
   sectionTitle: { color: '#e8e8ff', fontSize: 16, fontWeight: '700', marginBottom: 14 },
 
   // PBs
   pbRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#1e1e32',
+    paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#111',
   },
   pbRank: {
-    width: 28, height: 28, borderRadius: 14, backgroundColor: '#1e1e32',
+    width: 28, height: 28, borderRadius: 14, backgroundColor: '#111',
     alignItems: 'center', justifyContent: 'center',
   },
   pbRankText: { color: '#6C63FF', fontSize: 13, fontWeight: '700' },
@@ -207,8 +207,8 @@ const styles = StyleSheet.create({
 
   // Toggle
   toggle: {
-    flexDirection: 'row', backgroundColor: '#0a0a12', borderRadius: 10,
-    padding: 4, marginBottom: 16, borderWidth: 1, borderColor: '#1e1e32',
+    flexDirection: 'row', backgroundColor: '#000', borderRadius: 10,
+    padding: 4, marginBottom: 16, borderWidth: 1, borderColor: '#111',
   },
   toggleBtn: { flex: 1, padding: 8, borderRadius: 8, alignItems: 'center' },
   toggleActive: { backgroundColor: '#6C63FF' },

@@ -246,10 +246,10 @@ export default function CardioLogScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f0f1a' },
+  container: { flex: 1, backgroundColor: '#000' },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    padding: 16, paddingTop: 56, backgroundColor: '#1a1a2e',
+    padding: 16, paddingTop: 56, backgroundColor: '#0a0a0a',
   },
   back: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
@@ -257,13 +257,13 @@ const styles = StyleSheet.create({
   finishText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   scroll: { padding: 16, paddingBottom: 60 },
   card: {
-    backgroundColor: '#1a1a2e', borderRadius: 14, padding: 16,
-    marginBottom: 14, borderWidth: 1, borderColor: '#2a2a4a',
+    backgroundColor: '#0a0a0a', borderRadius: 14, padding: 16,
+    marginBottom: 14, borderWidth: 1, borderColor: '#1a1a2a',
   },
   cardTitle: { color: '#6C63FF', fontSize: 15, fontWeight: '700', marginBottom: 14 },
   logRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#2a2a4a',
+    paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#1a1a2a',
   },
   logLeft: { flex: 1 },
   logType: { color: '#fff', fontSize: 15, fontWeight: '600' },
@@ -273,17 +273,17 @@ const styles = StyleSheet.create({
   typeRow: { flexDirection: 'row', gap: 10 },
   typePicker: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: '#0f0f1a', borderRadius: 10, padding: 14,
-    borderWidth: 1, borderColor: '#2a2a4a',
+    backgroundColor: '#000', borderRadius: 10, padding: 14,
+    borderWidth: 1, borderColor: '#1a1a2a',
   },
   typePickerText: { color: '#fff', fontSize: 15 },
   addTypeBtn: {
     width: 48, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#0f0f1a', borderRadius: 10, borderWidth: 1, borderColor: '#2a2a4a',
+    backgroundColor: '#000', borderRadius: 10, borderWidth: 1, borderColor: '#1a1a2a',
   },
   input: {
-    backgroundColor: '#0f0f1a', color: '#fff', borderRadius: 10,
-    padding: 13, fontSize: 15, borderWidth: 1, borderColor: '#2a2a4a',
+    backgroundColor: '#000', color: '#fff', borderRadius: 10,
+    padding: 13, fontSize: 15, borderWidth: 1, borderColor: '#1a1a2a',
   },
   notesInput: { height: 80, textAlignVertical: 'top' },
   logBtn: {
@@ -298,18 +298,18 @@ const styles = StyleSheet.create({
   bigFinishText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   overlay: { flex: 1, backgroundColor: '#000000bb', justifyContent: 'flex-end' },
   sheet: {
-    backgroundColor: '#1a1a2e', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20,
+    backgroundColor: '#0a0a0a', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20,
   },
   sheetTitle: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 14 },
   sheetItem: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     padding: 14, borderRadius: 10, marginBottom: 6,
   },
-  sheetItemSelected: { backgroundColor: '#2a2a4a' },
+  sheetItemSelected: { backgroundColor: '#1a1a2a' },
   sheetItemText: { color: '#ccc', fontSize: 16 },
   sheetItemTextSelected: { color: '#6C63FF', fontWeight: '700' },
   sheetCancel: {
-    flex: 1, padding: 14, borderRadius: 10, backgroundColor: '#2a2a4a', alignItems: 'center', marginTop: 8,
+    flex: 1, padding: 14, borderRadius: 10, backgroundColor: '#1a1a2a', alignItems: 'center', marginTop: 8,
   },
   sheetCancelText: { color: '#aaa', fontWeight: '600' },
   modalBtns: { flexDirection: 'row', gap: 12, marginTop: 8 },

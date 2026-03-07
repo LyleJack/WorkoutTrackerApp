@@ -59,7 +59,7 @@ export default function HomeScreen() {
             },
           },
           {
-            text: 'Start new session',
+            text: 'New session',
             onPress: async () => {
               await clearLastSession();
               const sessionId = createSession(w.id);
@@ -70,6 +70,7 @@ export default function HomeScreen() {
         ]
       );
     } else {
+      // Go to exercise list so user can Start from there (normal flow)
       router.push(`/workout/${w.id}`);
     }
   }
@@ -283,7 +284,7 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0a0a12' },
+  container: { flex: 1, backgroundColor: '#000' },
   scroll: { paddingTop: 16, paddingHorizontal: 16 },
   cardioCard: {
     backgroundColor: '#0d1f15', borderRadius: 16, padding: 16, marginBottom: 20,
@@ -300,9 +301,9 @@ const styles = StyleSheet.create({
   },
   sectionLabel: { color: '#444', fontSize: 11, fontWeight: '700', letterSpacing: 1.5, marginBottom: 10 },
   workoutCard: {
-    backgroundColor: '#13131f', borderRadius: 14, paddingVertical: 16, paddingHorizontal: 16,
+    backgroundColor: '#0a0a0a', borderRadius: 14, paddingVertical: 16, paddingHorizontal: 16,
     marginBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    borderWidth: 1, borderColor: '#1e1e32',
+    borderWidth: 1, borderColor: '#111',
   },
   workoutCardInner: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   workoutDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#6C63FF' },
@@ -316,39 +317,39 @@ const styles = StyleSheet.create({
     shadowColor: '#6C63FF', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 12, elevation: 8,
   },
   newBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  fullModal: { flex: 1, backgroundColor: '#0a0a12' },
+  fullModal: { flex: 1, backgroundColor: '#000' },
   modalHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 56, paddingBottom: 16,
-    borderBottomWidth: 1, borderBottomColor: '#1e1e32',
+    borderBottomWidth: 1, borderBottomColor: '#111',
   },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   modalTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
   modalScroll: { padding: 20, paddingBottom: 60 },
   templateGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
   templateChip: {
-    backgroundColor: '#13131f', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16,
-    alignItems: 'center', width: '47%', borderWidth: 1, borderColor: '#1e1e32', gap: 6,
+    backgroundColor: '#0a0a0a', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16,
+    alignItems: 'center', width: '47%', borderWidth: 1, borderColor: '#111', gap: 6,
   },
   templateEmoji: { fontSize: 28 },
   templateName: { color: '#e8e8ff', fontSize: 14, fontWeight: '600' },
   dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: '#1e1e32' },
+  dividerLine: { flex: 1, height: 1, backgroundColor: '#111' },
   dividerText: { color: '#444', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
   blankRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
   blankInput: {
-    flex: 1, backgroundColor: '#13131f', color: '#fff', borderRadius: 12,
+    flex: 1, backgroundColor: '#0a0a0a', color: '#fff', borderRadius: 12,
     paddingHorizontal: 14, paddingVertical: 13, fontSize: 15,
-    borderWidth: 1, borderColor: '#1e1e32',
+    borderWidth: 1, borderColor: '#111',
   },
   createBtn: { backgroundColor: '#6C63FF', paddingHorizontal: 18, borderRadius: 12, justifyContent: 'center' },
-  createBtnDisabled: { backgroundColor: '#2a2a4a' },
+  createBtnDisabled: { backgroundColor: '#1a1a2a' },
   createBtnText: { color: '#fff', fontWeight: '700' },
   addExBtn: { width: 48, backgroundColor: '#6C63FF', borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   exerciseRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: '#13131f', borderRadius: 10, padding: 13, marginBottom: 6,
-    borderWidth: 1, borderColor: '#1e1e32',
+    backgroundColor: '#0a0a0a', borderRadius: 10, padding: 13, marginBottom: 6,
+    borderWidth: 1, borderColor: '#111',
   },
   exerciseDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#6C63FF' },
   exerciseRowText: { flex: 1, color: '#ccc', fontSize: 14 },

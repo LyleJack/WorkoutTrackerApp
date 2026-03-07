@@ -132,7 +132,7 @@ export default function SettingsScreen() {
               <Switch
                 value={notifEnabled}
                 onValueChange={toggleNotifications}
-                trackColor={{ false: '#2a2a4a', true: '#6C63FF' }}
+                trackColor={{ false: '#1a1a2a', true: '#6C63FF' }}
                 thumbColor="#fff"
               />
             </View>
@@ -210,11 +210,11 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f0f1a' },
+  container: { flex: 1, backgroundColor: '#000' },
   scroll: { padding: 16, gap: 16, paddingBottom: 40 },
   section: {
-    backgroundColor: '#1a1a2e', borderRadius: 14,
-    borderWidth: 1, borderColor: '#2a2a4a', overflow: 'hidden',
+    backgroundColor: '#0a0a0a', borderRadius: 14,
+    borderWidth: 1, borderColor: '#1a1a2a', overflow: 'hidden',
   },
   sectionTitle: {
     color: '#6C63FF', fontSize: 13, fontWeight: '700',
@@ -222,7 +222,7 @@ const styles = StyleSheet.create({
   },
   row: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    padding: 16, borderTopWidth: 1, borderTopColor: '#2a2a4a',
+    padding: 16, borderTopWidth: 1, borderTopColor: '#1a1a2a',
   },
   rowLeft: { flex: 1, marginRight: 12 },
   rowTitle: { color: '#fff', fontSize: 15, fontWeight: '500' },
@@ -230,12 +230,12 @@ const styles = StyleSheet.create({
   lockedIcon: { fontSize: 20 },
   timeRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    padding: 16, borderTopWidth: 1, borderTopColor: '#2a2a4a',
+    padding: 16, borderTopWidth: 1, borderTopColor: '#1a1a2a',
   },
   timeText: { color: '#6C63FF', fontSize: 18, fontWeight: '700' },
   actionBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    padding: 16, borderTopWidth: 1, borderTopColor: '#2a2a4a',
+    padding: 16, borderTopWidth: 1, borderTopColor: '#1a1a2a',
   },
   actionIcon: { fontSize: 24 },
   aboutCard: { padding: 20, alignItems: 'center', gap: 6 },
@@ -246,9 +246,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingBottom: 14,
   },
   streakInput: {
-    width: 80, backgroundColor: '#0f0f1a', color: '#fff', borderRadius: 10,
+    width: 80, backgroundColor: '#000', color: '#fff', borderRadius: 10,
     padding: 12, fontSize: 20, fontWeight: '700', textAlign: 'center',
-    borderWidth: 1, borderColor: '#2a2a4a',
+    borderWidth: 1, borderColor: '#1a1a2a',
   },
   streakSaveBtn: {
     backgroundColor: '#6C63FF', paddingHorizontal: 20, paddingVertical: 13,

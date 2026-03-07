@@ -10,11 +10,16 @@ export default function RootLayout() {
     <Tabs
       screenOptions={{
         tabBarActiveTintColor: '#6C63FF',
-        tabBarInactiveTintColor: '#888',
-        tabBarStyle: { backgroundColor: '#1a1a2e', borderTopColor: '#2a2a4a' },
-        headerStyle: { backgroundColor: '#1a1a2e' },
-        headerTintColor: '#fff',
-        headerTitleStyle: { fontWeight: 'bold' },
+        tabBarInactiveTintColor: '#333',
+        tabBarStyle: {
+          backgroundColor: '#000',
+          borderTopColor: '#111',
+          borderTopWidth: 1,
+          height: 60,
+          paddingBottom: 8,
+        },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        headerShown: false,
       }}
     >
       <Tabs.Screen name="index" options={{
@@ -37,8 +42,7 @@ export default function RootLayout() {
         title: 'Settings',
         tabBarIcon: ({ color, size }) => <Ionicons name="settings-outline" size={size} color={color} />,
       }} />
-      {/* Hide nested routes */}
-      <Tabs.Screen name="workout/[id]" options={{ href: null, headerShown: false }} />
+      <Tabs.Screen name="workout/[id]"            options={{ href: null, headerShown: false }} />
       <Tabs.Screen name="workout/log/[sessionId]" options={{ href: null, headerShown: false }} />
       <Tabs.Screen name="workout/cardio/[sessionId]" options={{ href: null, headerShown: false }} />
     </Tabs>
