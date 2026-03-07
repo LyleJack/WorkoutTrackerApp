@@ -23,6 +23,7 @@
     "expo-sharing": "~55.0.11",
     "expo-sqlite": "~55.0.10",
     "react": "19.2.0",
+    "react-dom": "^19.0.0",
     "react-native": "0.83.2",
     "react-native-gifted-charts": "^1.4.20",
     "react-native-linear-gradient": "^2.8.3",
