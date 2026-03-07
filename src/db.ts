@@ -402,6 +402,8 @@ export function importAllData(data: any) {
 
 // ─── Streak Offset (custom starting streak) ──────────────────────────────────
 
+// We track "session started" time in AsyncStorage keyed by sessionId
+// so we can detect if the user comes back within an hour
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STREAK_OFFSET_KEY = 'streak_offset';
@@ -524,4 +526,120 @@ export function createSessionOnDate(workoutId: number, date: string, notes?: str
     [workoutId, date, notes ?? null]
   );
   return result.lastInsertRowId;
+}
+
+// ─── Developer / Testing utilities ────────────────────────────────────────────
+
+export function deleteAllData() {
+  db.runSync('DELETE FROM cardio_logs');
+  db.runSync('DELETE FROM sets');
+  db.runSync('DELETE FROM sessions');
+  db.runSync('DELETE FROM exercises');
+  // Keep workouts but delete non-cardio ones, reset cardio
+  db.runSync('DELETE FROM workouts WHERE is_cardio = 0');
+}
+
+export function populateDummyData() {
+  // Create workouts
+  const chestId   = db.runSync("INSERT INTO workouts (name, is_cardio) VALUES ('Chest', 0)").lastInsertRowId;
+  const backId    = db.runSync("INSERT INTO workouts (name, is_cardio) VALUES ('Back', 0)").lastInsertRowId;
+  const legsId    = db.runSync("INSERT INTO workouts (name, is_cardio) VALUES ('Legs', 0)").lastInsertRowId;
+  const shoulderId= db.runSync("INSERT INTO workouts (name, is_cardio) VALUES ('Shoulders', 0)").lastInsertRowId;
+  const armsId    = db.runSync("INSERT INTO workouts (name, is_cardio) VALUES ('Arms', 0)").lastInsertRowId;
+
+  // Exercises
+  const benchId  = db.runSync("INSERT INTO exercises (workout_id, name, sort_order) VALUES (?, 'Bench Press', 0)", [chestId]).lastInsertRowId;
+  const inclineId= db.runSync("INSERT INTO exercises (workout_id, name, sort_order) VALUES (?, 'Incline DB Press', 1)", [chestId]).lastInsertRowId;
+  const flyId    = db.runSync("INSERT INTO exercises (workout_id, name, sort_order) VALUES (?, 'Cable Fly', 2)", [chestId]).lastInsertRowId;
+
+  const dlId     = db.runSync("INSERT INTO exercises (workout_id, name, sort_order) VALUES (?, 'Deadlift', 0)", [backId]).lastInsertRowId;
+  const pullId   = db.runSync("INSERT INTO exercises (workout_id, name, sort_order) VALUES (?, 'Pull Ups', 1)", [backId]).lastInsertRowId;
+  const rowId    = db.runSync("INSERT INTO exercises (workout_id, name, sort_order) VALUES (?, 'Barbell Row', 2)", [backId]).lastInsertRowId;
+
+  const sqId     = db.runSync("INSERT INTO exercises (workout_id, name, sort_order) VALUES (?, 'Squat', 0)", [legsId]).lastInsertRowId;
+  const lpId     = db.runSync("INSERT INTO exercises (workout_id, name, sort_order) VALUES (?, 'Leg Press', 1)", [legsId]).lastInsertRowId;
+  const rdlId    = db.runSync("INSERT INTO exercises (workout_id, name, sort_order) VALUES (?, 'Romanian Deadlift', 2)", [legsId]).lastInsertRowId;
+
+  const ohpId    = db.runSync("INSERT INTO exercises (workout_id, name, sort_order) VALUES (?, 'Overhead Press', 0)", [shoulderId]).lastInsertRowId;
+  const latId    = db.runSync("INSERT INTO exercises (workout_id, name, sort_order) VALUES (?, 'Lateral Raise', 1)", [shoulderId]).lastInsertRowId;
+
+  const curlId   = db.runSync("INSERT INTO exercises (workout_id, name, sort_order) VALUES (?, 'Barbell Curl', 0)", [armsId]).lastInsertRowId;
+  const dipId    = db.runSync("INSERT INTO exercises (workout_id, name, sort_order) VALUES (?, 'Tricep Dip', 1)", [armsId]).lastInsertRowId;
+
+  // Generate 8 weeks of sessions with progressive overload
+  const today = new Date();
+  const sessions = [
+    // Chest sessions - progressing from 80kg to 100kg bench
+    { wId: chestId, daysAgo: 56, sets: [[benchId,80,8],[benchId,80,8],[benchId,80,6],[inclineId,60,10],[inclineId,60,10],[flyId,20,12],[flyId,20,12]] },
+    { wId: chestId, daysAgo: 49, sets: [[benchId,82.5,8],[benchId,82.5,8],[benchId,82.5,6],[inclineId,62.5,10],[inclineId,62.5,10],[flyId,22.5,12]] },
+    { wId: chestId, daysAgo: 42, sets: [[benchId,85,8],[benchId,85,8],[benchId,85,6],[inclineId,65,10],[inclineId,65,10],[flyId,22.5,12]] },
+    { wId: chestId, daysAgo: 35, sets: [[benchId,87.5,8],[benchId,87.5,7],[benchId,87.5,6],[inclineId,67.5,10],[inclineId,67.5,10],[flyId,25,12]] },
+    { wId: chestId, daysAgo: 28, sets: [[benchId,90,8],[benchId,90,8],[benchId,90,7],[inclineId,70,10],[inclineId,70,10],[flyId,25,12]] },
+    { wId: chestId, daysAgo: 21, sets: [[benchId,92.5,8],[benchId,92.5,8],[benchId,92.5,6],[inclineId,72.5,10],[inclineId,70,10],[flyId,27.5,12]] },
+    { wId: chestId, daysAgo: 14, sets: [[benchId,95,8],[benchId,95,8],[benchId,95,6],[inclineId,75,10],[inclineId,75,10],[flyId,27.5,12]] },
+    { wId: chestId, daysAgo: 7,  sets: [[benchId,100,5],[benchId,100,5],[benchId,100,4],[inclineId,77.5,10],[inclineId,77.5,10],[flyId,30,12]] },
+    // Back sessions
+    { wId: backId,  daysAgo: 54, sets: [[dlId,120,5],[dlId,120,5],[dlId,120,5],[pullId,0,8],[pullId,0,7],[rowId,80,8],[rowId,80,8]] },
+    { wId: backId,  daysAgo: 47, sets: [[dlId,125,5],[dlId,125,5],[dlId,125,5],[pullId,0,8],[pullId,0,8],[rowId,82.5,8],[rowId,82.5,8]] },
+    { wId: backId,  daysAgo: 40, sets: [[dlId,130,5],[dlId,130,5],[dlId,130,4],[pullId,0,9],[pullId,0,8],[rowId,85,8],[rowId,85,8]] },
+    { wId: backId,  daysAgo: 33, sets: [[dlId,132.5,5],[dlId,132.5,5],[dlId,132.5,5],[pullId,0,10],[pullId,0,9],[rowId,87.5,8]] },
+    { wId: backId,  daysAgo: 26, sets: [[dlId,135,5],[dlId,135,5],[dlId,135,5],[pullId,0,10],[pullId,0,10],[rowId,90,8],[rowId,90,7]] },
+    { wId: backId,  daysAgo: 12, sets: [[dlId,140,5],[dlId,140,5],[dlId,140,4],[pullId,0,11],[pullId,0,10],[rowId,92.5,8],[rowId,92.5,8]] },
+    { wId: backId,  daysAgo: 5,  sets: [[dlId,142.5,5],[dlId,142.5,5],[dlId,142.5,5],[pullId,0,12],[pullId,0,11],[rowId,95,8],[rowId,95,7]] },
+    // Legs
+    { wId: legsId,  daysAgo: 53, sets: [[sqId,100,5],[sqId,100,5],[sqId,100,5],[lpId,140,10],[lpId,140,10],[rdlId,80,10],[rdlId,80,10]] },
+    { wId: legsId,  daysAgo: 46, sets: [[sqId,102.5,5],[sqId,102.5,5],[sqId,102.5,5],[lpId,150,10],[lpId,150,10],[rdlId,82.5,10]] },
+    { wId: legsId,  daysAgo: 39, sets: [[sqId,105,5],[sqId,105,5],[sqId,105,5],[lpId,160,10],[lpId,160,10],[rdlId,85,10],[rdlId,85,10]] },
+    { wId: legsId,  daysAgo: 25, sets: [[sqId,107.5,5],[sqId,107.5,5],[sqId,107.5,4],[lpId,170,10],[lpId,170,10],[rdlId,87.5,10]] },
+    { wId: legsId,  daysAgo: 11, sets: [[sqId,110,5],[sqId,110,5],[sqId,110,5],[lpId,180,10],[lpId,180,10],[rdlId,90,10],[rdlId,90,9]] },
+    { wId: legsId,  daysAgo: 4,  sets: [[sqId,112.5,5],[sqId,112.5,5],[sqId,112.5,5],[lpId,190,10],[lpId,190,10],[rdlId,92.5,10]] },
+    // Shoulders
+    { wId: shoulderId, daysAgo: 52, sets: [[ohpId,60,8],[ohpId,60,8],[ohpId,60,7],[latId,12.5,15],[latId,12.5,15],[latId,12.5,12]] },
+    { wId: shoulderId, daysAgo: 38, sets: [[ohpId,62.5,8],[ohpId,62.5,8],[ohpId,62.5,7],[latId,15,15],[latId,15,14],[latId,15,12]] },
+    { wId: shoulderId, daysAgo: 24, sets: [[ohpId,65,8],[ohpId,65,8],[ohpId,65,6],[latId,15,15],[latId,15,15],[latId,15,14]] },
+    { wId: shoulderId, daysAgo: 10, sets: [[ohpId,67.5,8],[ohpId,67.5,7],[ohpId,67.5,6],[latId,17.5,15],[latId,17.5,14],[latId,17.5,12]] },
+    { wId: shoulderId, daysAgo: 3,  sets: [[ohpId,70,8],[ohpId,70,8],[ohpId,70,7],[latId,17.5,15],[latId,17.5,15],[latId,17.5,14]] },
+    // Arms
+    { wId: armsId, daysAgo: 50, sets: [[curlId,40,10],[curlId,40,10],[curlId,40,8],[dipId,0,12],[dipId,0,12],[dipId,0,10]] },
+    { wId: armsId, daysAgo: 36, sets: [[curlId,42.5,10],[curlId,42.5,10],[curlId,42.5,8],[dipId,0,14],[dipId,0,13],[dipId,0,12]] },
+    { wId: armsId, daysAgo: 22, sets: [[curlId,45,10],[curlId,45,10],[curlId,45,8],[dipId,0,15],[dipId,0,15],[dipId,0,13]] },
+    { wId: armsId, daysAgo: 8,  sets: [[curlId,47.5,10],[curlId,47.5,10],[curlId,47.5,8],[dipId,0,16],[dipId,0,15],[dipId,0,14]] },
+    { wId: armsId, daysAgo: 1,  sets: [[curlId,50,10],[curlId,50,10],[curlId,50,8],[dipId,0,18],[dipId,0,17],[dipId,0,15]] },
+  ];
+
+  sessions.forEach(({ wId, daysAgo, sets }) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() - daysAgo);
+    const dateStr = d.toISOString().slice(0, 10);
+    const sessionId = db.runSync(
+      'INSERT INTO sessions (workout_id, date) VALUES (?, ?)', [wId, dateStr]
+    ).lastInsertRowId;
+    sets.forEach(([exId, weight, reps], i) => {
+      const setNum = sets.slice(0, i).filter(s => s[0] === exId).length + 1;
+      db.runSync(
+        'INSERT INTO sets (session_id, exercise_id, weight, reps, set_number) VALUES (?, ?, ?, ?, ?)',
+        [sessionId, exId, weight, reps, setNum]
+      );
+    });
+  });
+
+  // Also add a couple of cardio sessions
+  const cardioWorkout = db.getFirstSync("SELECT id FROM workouts WHERE is_cardio = 1") as any;
+  if (cardioWorkout) {
+    const treadmillType = db.getFirstSync("SELECT id FROM cardio_types WHERE name = 'Treadmill'") as any;
+    if (treadmillType) {
+      [15, 8, 2].forEach(daysAgo => {
+        const d = new Date(today);
+        d.setDate(d.getDate() - daysAgo);
+        const dateStr = d.toISOString().slice(0, 10);
+        const sId = db.runSync(
+          'INSERT INTO sessions (workout_id, date) VALUES (?, ?)', [cardioWorkout.id, dateStr]
+        ).lastInsertRowId;
+        db.runSync(
+          'INSERT INTO cardio_logs (session_id, cardio_type_id, duration_minutes, calories, distance_km) VALUES (?, ?, ?, ?, ?)',
+          [sId, treadmillType.id, 30 + daysAgo, 280 + daysAgo * 5, 4.5 + daysAgo * 0.2]
+        );
+      });
+    }
+  }
 }

@@ -15,7 +15,7 @@ import {
   setupNotificationHandler,
   isNotificationsSupported,
 } from '@/src/notifications';
-import { exportAllData, importAllData, getStreakOffset, setStreakOffset } from '@/src/db';
+import { exportAllData, importAllData, getStreakOffset, setStreakOffset, deleteAllData, populateDummyData } from '@/src/db';
 
 export default function SettingsScreen() {
   const [notifEnabled, setNotifEnabled] = useState(false);
@@ -37,6 +37,47 @@ export default function SettingsScreen() {
     });
     getStreakOffset().then(v => setStreakOffsetText(String(v)));
   }, []);
+
+  function handleDeleteAllData() {
+    Alert.alert(
+      '⚠️ Delete All Data',
+      'This will permanently remove ALL workouts, exercises, sessions and sets. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Everything',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              'Are you absolutely sure?',
+              'All your workout history will be lost forever.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Yes, delete all', style: 'destructive', onPress: () => { deleteAllData(); Alert.alert('Done', 'All data has been deleted.'); } },
+              ]
+            );
+          },
+        },
+      ]
+    );
+  }
+
+  function handlePopulateDummy() {
+    Alert.alert(
+      'Populate Dummy Data',
+      'This will add sample workouts, exercises and 8 weeks of sessions for testing. Existing data is kept.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Add dummy data',
+          onPress: () => {
+            populateDummyData();
+            Alert.alert('Done', 'Dummy data has been added. Restart the app to see it reflected everywhere.');
+          },
+        },
+      ]
+    );
+  }
 
   async function saveStreakOffset() {
     const n = parseInt(streakOffsetText) || 0;
@@ -197,6 +238,24 @@ export default function SettingsScreen() {
       </View>
 
       <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Developer</Text>
+        <TouchableOpacity style={styles.dangerBtn} onPress={handlePopulateDummy}>
+          <Text style={styles.dangerIcon}>🧪</Text>
+          <View>
+            <Text style={styles.rowTitle}>Populate Dummy Data</Text>
+            <Text style={styles.rowSub}>Add 8 weeks of sample workouts for testing</Text>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.dangerBtn, styles.dangerBtnRed]} onPress={handleDeleteAllData}>
+          <Text style={styles.dangerIcon}>🗑️</Text>
+          <View>
+            <Text style={[styles.rowTitle, { color: '#ff4444' }]}>Delete All Data</Text>
+            <Text style={styles.rowSub}>Permanently remove all workouts and history</Text>
+          </View>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.section}>
         <Text style={styles.sectionTitle}>About</Text>
         <View style={styles.aboutCard}>
           <Text style={styles.appName}>💪 WorkoutTracker</Text>
@@ -256,4 +315,12 @@ const styles = StyleSheet.create({
   },
   streakSavedBtn: { backgroundColor: '#22c55e' },
   streakSaveBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  dangerBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    paddingHorizontal: 16, paddingVertical: 14,
+    borderRadius: 12, marginBottom: 8, backgroundColor: '#0a0a0a',
+    borderWidth: 1, borderColor: '#111',
+  },
+  dangerBtnRed: { borderColor: '#2a1111', backgroundColor: '#0d0606' },
+  dangerIcon: { fontSize: 22 },
 });
