@@ -5,12 +5,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { initDB } from '@/src/db';
 import { ErrorBoundary } from '@/src/ErrorBoundary';
+import { C, FONT } from '@/src/theme';
 
-// ─── Shared tab screen header ─────────────────────────────────────────────────
-// StatusBar.currentHeight is set synchronously by the native bridge before the
-// first JS render on Android — the most reliable source in Expo Go where the
-// safe-area context insets are not always forwarded to JS.
-// Read inside the render function, never at module-load time.
+// ─── Shared tab-screen header ─────────────────────────────────────────────────
+// StatusBar.currentHeight is read inside render — it's set synchronously by the
+// native bridge before the first JS frame on Android and is more reliable than
+// useSafeAreaInsets() in Expo Go, which does not always forward insets to JS.
 export function AppHeader({
   title,
   right,
@@ -18,29 +18,29 @@ export function AppHeader({
   title: string;
   right?: React.ReactNode;
 }) {
-  const sbH = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 24) : 44;
+  const statusH = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 24) : 44;
   return (
-    <View style={[hdrStyles.container, { paddingTop: sbH + 10 }]}>
-      <Text style={hdrStyles.title}>{title}</Text>
-      {right != null && <View style={hdrStyles.right}>{right}</View>}
+    <View style={[styles.header, { paddingTop: statusH + 10 }]}>
+      <Text style={styles.title}>{title}</Text>
+      {right != null && <View style={styles.right}>{right}</View>}
     </View>
   );
 }
 
-const hdrStyles = StyleSheet.create({
-  container: {
-    backgroundColor: '#000',
+const styles = StyleSheet.create({
+  header: {
+    backgroundColor: C.bg,
     paddingBottom: 14,
     paddingHorizontal: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#0f0f0f',
+    borderBottomColor: C.border,
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
   },
   title: {
-    color: '#fff',
-    fontSize: 26,
+    color: C.white,
+    fontSize: FONT['4xl'],
     fontWeight: '800',
     letterSpacing: -0.5,
   },
@@ -55,24 +55,24 @@ const hdrStyles = StyleSheet.create({
 // ─── Root layout ──────────────────────────────────────────────────────────────
 export default function RootLayout() {
   useEffect(() => {
-    try { initDB(); } catch (e) { console.error('DB init failed', e); }
+    try { initDB(); } catch (e) { console.error('[DB] init failed:', e); }
   }, []);
 
   return (
     <SafeAreaProvider>
-      <ErrorBoundary fallbackLabel="A critical error occurred. Try restarting the app.">
+      <ErrorBoundary fallbackLabel="A critical error occurred. Please restart the app.">
         <Tabs
           screenOptions={{
-            tabBarActiveTintColor:   '#6C63FF',
-            tabBarInactiveTintColor: '#333',
+            tabBarActiveTintColor:   C.tabActive,
+            tabBarInactiveTintColor: C.tabInactive,
             tabBarStyle: {
-              backgroundColor: '#000',
-              borderTopColor:  '#111',
+              backgroundColor: C.tabBg,
+              borderTopColor:  C.tabBorder,
               borderTopWidth:  1,
               height:          60,
               paddingBottom:   8,
             },
-            tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+            tabBarLabelStyle: { fontSize: FONT.sm, fontWeight: '600' },
             headerShown: false,
           }}
         >
@@ -81,6 +81,7 @@ export default function RootLayout() {
           <Tabs.Screen name="stats"    options={{ title: 'Stats',    tabBarIcon: ({ color, size }) => <Ionicons name="stats-chart-outline" size={size} color={color} /> }} />
           <Tabs.Screen name="progress" options={{ title: 'Progress', tabBarIcon: ({ color, size }) => <Ionicons name="trending-up-outline" size={size} color={color} /> }} />
           <Tabs.Screen name="settings" options={{ title: 'Settings', tabBarIcon: ({ color, size }) => <Ionicons name="settings-outline"    size={size} color={color} /> }} />
+          {/* Non-tab screens — hidden from the tab bar */}
           <Tabs.Screen name="workout/[id]"               options={{ href: null, headerShown: false }} />
           <Tabs.Screen name="workout/log/[sessionId]"    options={{ href: null, headerShown: false }} />
           <Tabs.Screen name="workout/cardio/[sessionId]" options={{ href: null, headerShown: false }} />

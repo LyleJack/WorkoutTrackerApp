@@ -1,16 +1,17 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, TextInput,
-  StyleSheet, StatusBar, ScrollView, Dimensions, Modal,
+  StyleSheet, ScrollView, Dimensions, Modal,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  getWorkouts, addWorkout, deleteWorkout, createSession, addExercise,
+  getWorkouts, addWorkout, createSession, addExercise,
   getRecentSession, clearLastSession, getLastSessionSummary, Workout,
 } from '@/src/db';
 import { WorkoutIcon, getWorkoutIcon } from '@/src/WorkoutIcons';
 import { AppHeader } from '@/app/_layout';
+import { C, FONT } from '@/src/theme';
 
 const SCREEN_W = Dimensions.get('window').width;
 const CARD_GAP = 12;
@@ -165,7 +166,6 @@ export default function HomeScreen() {
   // ── GRID MODE ──────────────────────────────────────────────────────────────
   if (mode === 'grid') return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
       <AppHeader title="Workouts" />
 
       {/* Resume / new session modal */}

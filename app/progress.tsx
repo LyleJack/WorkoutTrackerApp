@@ -7,39 +7,31 @@ import { LineChart } from 'react-native-gifted-charts';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '@/app/_layout';
 import { ErrorBoundary } from '@/src/ErrorBoundary';
+import { C, FONT } from '@/src/theme';
+import { formatDuration } from '@/src/utils';
 import {
   getUniqueWorkoutNames, getHistoricalExerciseNames,
   getExerciseProgress, getCardioProgress,
   ProgressPoint, CardioProgressPoint,
 } from '@/src/db';
 
-const SCREEN_W       = Dimensions.get('window').width;
-const COLORS         = ['#6C63FF','#22c55e','#f59e0b','#ef4444','#3b82f6','#ec4899','#8b5cf6','#14b8a6'];
-const BW_WEIGHTED_CLR = '#f59e0b';   // orange dot on a BW exercise when weight was added
+const SCREEN_W        = Dimensions.get('window').width;
+const COLORS          = ['#6C63FF','#22c55e','#f59e0b','#ef4444','#3b82f6','#ec4899','#8b5cf6','#14b8a6'];
+const BW_WEIGHTED_CLR = C.orange;
 
 // ── Classifiers ────────────────────────────────────────────────────────────────
 
 function isDurationExercise(points: ProgressPoint[]) {
-  // If ANY session has a meaningful duration_seconds and reps === 1, treat as duration-mode
   return points.some(p => (p.max_duration_seconds ?? 0) > 0);
 }
 
 function classifyExercise(points: ProgressPoint[]) {
   if (points.length === 0) return { isBW: false, isDuration: false, hasMixed: false };
   if (isDurationExercise(points)) return { isBW: false, isDuration: true, hasMixed: false };
-  const bwCount = points.filter(p => p.weight === 0).length;
-  const isBW    = bwCount >= points.length / 2;
+  const bwCount  = points.filter(p => p.weight === 0).length;
+  const isBW     = bwCount >= points.length / 2;
   const hasMixed = isBW && points.some(p => p.weight > 0);
   return { isBW, isDuration: false, hasMixed };
-}
-
-function fmtDuration(secs: number) {
-  if (secs >= 60) {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return s > 0 ? `${m}m ${s}s` : `${m}m`;
-  }
-  return `${secs}s`;
 }
 
 // ── Progress screen ─────────────────────────────────────────────────────────────
@@ -112,7 +104,7 @@ export default function ProgressScreen() {
         onPress: () => {
           let label: string;
           if (isDuration) {
-            label = fmtDuration(p.max_duration_seconds ?? 0);
+            label = formatDuration(p.max_duration_seconds ?? 0);
             if (isWeighted) label += ` + ${p.weight} kg`;
           } else if (isBW && isWeighted) {
             label = `${p.max_reps} reps + ${p.weight} kg`;
@@ -241,7 +233,7 @@ export default function ProgressScreen() {
               </View>
             )}
             {isBW      && peakReps > 0  && <Text style={[styles.cardPeak, { color: baseColor }]}>{peakReps} reps</Text>}
-            {isDuration && peakDur  > 0  && <Text style={[styles.cardPeak, { color: baseColor }]}>{fmtDuration(peakDur)}</Text>}
+            {isDuration && peakDur  > 0  && <Text style={[styles.cardPeak, { color: baseColor }]}>{formatDuration(peakDur)}</Text>}
             {!isBW && !isDuration && peakWeight > 0 && (
               <Text style={[styles.cardPeak, { color: baseColor }]}>
                 {viewMode === 'weight' ? `${peakWeight} kg` : `${Math.round(peakVol)} vol`}

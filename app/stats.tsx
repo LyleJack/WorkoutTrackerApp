@@ -1,9 +1,11 @@
 import { useState, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StatusBar, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { AppHeader } from '@/app/_layout';
 import { ErrorBoundary } from '@/src/ErrorBoundary';
 import { BarChart } from 'react-native-gifted-charts';
+import { C, FONT } from '@/src/theme';
+import { formatVolume } from '@/src/utils';
 import {
   getMostPopularWorkouts, getTotalWorkouts, getTotalSets,
   getTotalVolume, getThisWeekSessions, getPersonalBests,
@@ -11,12 +13,6 @@ import {
 } from '@/src/db';
 
 const SCREEN_W = Dimensions.get('window').width;
-
-function formatVolume(kg: number): string {
-  if (kg >= 1_000_000) return `${(kg / 1_000_000).toFixed(1)}M`;
-  if (kg >= 1_000)     return `${(kg / 1_000).toFixed(1)}k`;
-  return String(kg);
-}
 
 export default function StatsScreen() {
   const [streak,        setStreak]        = useState(0);
@@ -29,8 +25,7 @@ export default function StatsScreen() {
   const [popular,       setPopular]       = useState<WorkoutCount[]>([]);
 
   const load = useCallback(async () => {
-    const s = await getStreakWithOffset();
-    setStreak(s);
+    setStreak(await getStreakWithOffset());
     setTotalWorkouts(getTotalWorkouts());
     setTotalSets(getTotalSets());
     setTotalVolume(getTotalVolume());
@@ -42,9 +37,9 @@ export default function StatsScreen() {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const chartData = popular.map((w, i) => ({
-    value: w.count,
-    label: w.name.length > 7 ? w.name.slice(0, 7) + '…' : w.name,
-    frontColor:    i === 0 ? '#6C63FF' : '#1a1a2a',
+    value:         w.count,
+    label:         w.name.length > 7 ? w.name.slice(0, 7) + '…' : w.name,
+    frontColor:    i === 0 ? C.purple : '#1a1a2a',
     gradientColor: i === 0 ? '#9d97ff' : '#3a3a6a',
   }));
 
@@ -52,79 +47,62 @@ export default function StatsScreen() {
 
   return (
     <ErrorBoundary fallbackLabel="Something went wrong in Stats.">
-      <View style={{ flex: 1, backgroundColor: '#000' }}>
-        <StatusBar barStyle="light-content" />
+      <View style={s.container}>
         <AppHeader title="Stats" />
-        <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
+        <ScrollView contentContainerStyle={s.scroll}>
 
-          {/* Streak hero */}
-          <View style={styles.streakCard}>
-            <View style={styles.streakLeft}>
-              <Text style={styles.streakFire}>🔥</Text>
+          {/* Streak hero card */}
+          <View style={s.streakCard}>
+            <View style={s.streakLeft}>
+              <Text style={s.streakFire}>🔥</Text>
               <View>
-                <Text style={styles.streakNum}>{streak}</Text>
-                <Text style={styles.streakLabel}>day streak</Text>
+                <Text style={s.streakNum}>{streak}</Text>
+                <Text style={s.streakLabel}>day streak</Text>
               </View>
             </View>
-            <View style={styles.weekDots}>
+            <View style={s.weekDots}>
               {Array.from({ length: 7 }).map((_, i) => (
-                <View key={i} style={[styles.weekDot, i < weekSessions && styles.weekDotFilled]} />
+                <View key={i} style={[s.weekDot, i < weekSessions && s.weekDotFilled]} />
               ))}
-              <Text style={styles.weekLabel}>this week</Text>
+              <Text style={s.weekLabel}>this week</Text>
             </View>
           </View>
 
           {/* Stat grid */}
-          <View style={styles.grid}>
-            <View style={[styles.statCard, styles.statCardPurple]}>
-              <Text style={styles.statIcon}>🏋️</Text>
-              <Text style={styles.statNum}>{totalWorkouts}</Text>
-              <Text style={styles.statLabel}>Sessions</Text>
-            </View>
-            <View style={[styles.statCard, styles.statCardGreen]}>
-              <Text style={styles.statIcon}>📦</Text>
-              <Text style={styles.statNum}>{totalSets}</Text>
-              <Text style={styles.statLabel}>Total Sets</Text>
-            </View>
-            <View style={[styles.statCard, styles.statCardOrange]}>
-              <Text style={styles.statIcon}>⚖️</Text>
-              <Text style={styles.statNum}>{formatVolume(totalVolume)}</Text>
-              <Text style={styles.statLabel}>kg Lifted</Text>
-            </View>
-            <View style={[styles.statCard, styles.statCardBlue]}>
-              <Text style={styles.statIcon}>📅</Text>
-              <Text style={styles.statNum}>{weekSessions}/7</Text>
-              <Text style={styles.statLabel}>This Week</Text>
-            </View>
+          <View style={s.grid}>
+            <StatCard emoji="🏋️" value={String(totalWorkouts)}       label="Sessions"   tint="#110d1f" border="#2a1f4a" />
+            <StatCard emoji="📦" value={String(totalSets)}           label="Total Sets"  tint="#0d1f12" border="#1a3a22" />
+            <StatCard emoji="⚖️" value={formatVolume(totalVolume)}   label="kg Lifted"  tint="#1f150a" border="#3a2a12" />
+            <StatCard emoji="📅" value={`${weekSessions}/7`}         label="This Week"  tint="#0a121f" border="#12223a" />
           </View>
 
           {/* Personal bests */}
           {pbs.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>🏆 Personal Bests</Text>
+            <View style={s.section}>
+              <Text style={s.sectionTitle}>🏆 Personal Bests</Text>
               {pbs.map((pb, i) => (
-                <View key={i} style={styles.pbRow}>
-                  <View style={styles.pbRank}>
-                    <Text style={styles.pbRankText}>{i + 1}</Text>
+                <View key={i} style={s.pbRow}>
+                  <View style={s.pbRank}>
+                    <Text style={s.pbRankText}>{i + 1}</Text>
                   </View>
-                  <Text style={styles.pbName}>{pb.exercise_name}</Text>
-                  <Text style={styles.pbVal}>{pb.weight} kg</Text>
+                  <Text style={s.pbName}>{pb.exercise_name}</Text>
+                  <Text style={s.pbVal}>{pb.weight} kg</Text>
                 </View>
               ))}
             </View>
           )}
 
-          {/* Popular workouts chart */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>📊 Most Popular</Text>
-            <View style={styles.toggle}>
+          {/* Popular workouts */}
+          <View style={s.section}>
+            <Text style={s.sectionTitle}>📊 Most Popular</Text>
+            <View style={s.toggle}>
               {(['month', 'year'] as const).map(p => (
                 <TouchableOpacity
                   key={p}
-                  style={[styles.toggleBtn, period === p && styles.toggleActive]}
+                  style={[s.toggleBtn, period === p && s.toggleActive]}
                   onPress={() => setPeriod(p)}
                 >
-                  <Text style={[styles.toggleText, period === p && styles.toggleTextActive]}>
+                  <Text style={[s.toggleText, period === p && s.toggleTextActive]}>
                     {p === 'month' ? 'This Month' : 'This Year'}
                   </Text>
                 </TouchableOpacity>
@@ -141,15 +119,15 @@ export default function StatsScreen() {
                 hideRules
                 xAxisThickness={0}
                 yAxisThickness={0}
-                yAxisTextStyle={{ color: '#444', fontSize: 11 }}
-                xAxisLabelTextStyle={{ color: '#555', fontSize: 10 }}
+                yAxisTextStyle={{ color: C.textFaint, fontSize: FONT.sm }}
+                xAxisLabelTextStyle={{ color: C.textMuted, fontSize: FONT.xs }}
                 noOfSections={4}
                 maxValue={maxBarVal}
                 isAnimated
               />
             ) : (
-              <View style={styles.noData}>
-                <Text style={styles.noDataText}>
+              <View style={s.noData}>
+                <Text style={s.noDataText}>
                   No workouts {period === 'month' ? 'this month' : 'this year'}
                 </Text>
               </View>
@@ -163,45 +141,57 @@ export default function StatsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
+function StatCard({ emoji, value, label, tint, border }: {
+  emoji: string; value: string; label: string; tint: string; border: string;
+}) {
+  return (
+    <View style={[s.statCard, { backgroundColor: tint, borderColor: border }]}>
+      <Text style={s.statIcon}>{emoji}</Text>
+      <Text style={s.statNum}>{value}</Text>
+      <Text style={s.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: C.bg },
   scroll:    { padding: 16, paddingBottom: 50 },
 
-  streakCard:  { backgroundColor: '#0a0a0a', borderRadius: 20, padding: 20, marginBottom: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: '#111' },
+  streakCard:  {
+    backgroundColor: C.bgCard, borderRadius: 20, padding: 20, marginBottom: 14,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    borderWidth: 1, borderColor: C.border,
+  },
   streakLeft:  { flexDirection: 'row', alignItems: 'center', gap: 16 },
   streakFire:  { fontSize: 44 },
-  streakNum:   { color: '#fff', fontSize: 56, fontWeight: '900', lineHeight: 60 },
-  streakLabel: { color: '#555', fontSize: 15 },
+  streakNum:   { color: C.white, fontSize: 56, fontWeight: '900', lineHeight: 60 },
+  streakLabel: { color: C.textMuted, fontSize: 15 },
   weekDots:    { alignItems: 'center', gap: 6 },
   weekDot:     { width: 10, height: 10, borderRadius: 5, backgroundColor: '#111' },
-  weekDotFilled: { backgroundColor: '#6C63FF' },
-  weekLabel:   { color: '#444', fontSize: 11, marginTop: 4 },
+  weekDotFilled: { backgroundColor: C.purple },
+  weekLabel:   { color: C.textFaint, fontSize: FONT.sm, marginTop: 4 },
 
-  grid:           { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
-  statCard:       { width: (SCREEN_W - 52) / 2, borderRadius: 16, padding: 16, gap: 4, borderWidth: 1 },
-  statCardPurple: { backgroundColor: '#110d1f', borderColor: '#2a1f4a' },
-  statCardGreen:  { backgroundColor: '#0d1f12', borderColor: '#1a3a22' },
-  statCardOrange: { backgroundColor: '#1f150a', borderColor: '#3a2a12' },
-  statCardBlue:   { backgroundColor: '#0a121f', borderColor: '#12223a' },
-  statIcon:       { fontSize: 22 },
-  statNum:        { color: '#e8e8ff', fontSize: 30, fontWeight: '800', marginTop: 4 },
-  statLabel:      { color: '#555', fontSize: 13 },
+  grid:     { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
+  statCard: { width: (SCREEN_W - 52) / 2, borderRadius: 16, padding: 16, gap: 4, borderWidth: 1 },
+  statIcon: { fontSize: 22 },
+  statNum:  { color: C.textPrimary, fontSize: 30, fontWeight: '800', marginTop: 4 },
+  statLabel:{ color: C.textMuted, fontSize: FONT.base },
 
-  section:      { backgroundColor: '#0a0a0a', borderRadius: 18, padding: 18, marginBottom: 14, borderWidth: 1, borderColor: '#111' },
-  sectionTitle: { color: '#e8e8ff', fontSize: 16, fontWeight: '700', marginBottom: 14 },
+  section:      { backgroundColor: C.bgCard, borderRadius: 18, padding: 18, marginBottom: 14, borderWidth: 1, borderColor: C.border },
+  sectionTitle: { color: C.textPrimary, fontSize: FONT.xl, fontWeight: '700', marginBottom: 14 },
 
-  pbRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#111' },
-  pbRank:    { width: 28, height: 28, borderRadius: 14, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
-  pbRankText:{ color: '#6C63FF', fontSize: 13, fontWeight: '700' },
-  pbName:    { flex: 1, color: '#ccc', fontSize: 14 },
-  pbVal:     { color: '#e8e8ff', fontSize: 15, fontWeight: '700' },
+  pbRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: C.border },
+  pbRank:    { width: 28, height: 28, borderRadius: 14, backgroundColor: C.border, alignItems: 'center', justifyContent: 'center' },
+  pbRankText:{ color: C.purple, fontSize: FONT.base, fontWeight: '700' },
+  pbName:    { flex: 1, color: '#ccc', fontSize: FONT.md },
+  pbVal:     { color: C.textPrimary, fontSize: FONT.lg, fontWeight: '700' },
 
-  toggle:          { flexDirection: 'row', backgroundColor: '#000', borderRadius: 10, padding: 4, marginBottom: 16, borderWidth: 1, borderColor: '#111' },
+  toggle:          { flexDirection: 'row', backgroundColor: C.bg, borderRadius: 10, padding: 4, marginBottom: 16, borderWidth: 1, borderColor: C.border },
   toggleBtn:       { flex: 1, padding: 8, borderRadius: 8, alignItems: 'center' },
-  toggleActive:    { backgroundColor: '#6C63FF' },
-  toggleText:      { color: '#555', fontWeight: '600', fontSize: 13 },
-  toggleTextActive:{ color: '#fff' },
+  toggleActive:    { backgroundColor: C.purple },
+  toggleText:      { color: C.textMuted, fontWeight: '600', fontSize: FONT.base },
+  toggleTextActive:{ color: C.white },
 
   noData:    { alignItems: 'center', padding: 24 },
-  noDataText:{ color: '#444', fontSize: 14 },
+  noDataText:{ color: C.textFaint, fontSize: FONT.md },
 });

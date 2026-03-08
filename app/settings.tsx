@@ -1,113 +1,55 @@
-import { useState, useEffect } from 'react';
+import { AppHeader } from '@/app/_layout';
 import {
-  View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, Switch, Alert, Platform, TextInput, StatusBar,
-} from 'react-native';
-import * as Sharing from 'expo-sharing';
+  deleteAllData,
+  exportAllData,
+  getStreakOffset,
+  importAllData,
+  populateDummyData, resetWithDummyData,
+  setStreakOffset,
+} from '@/src/db';
+import { ErrorBoundary } from '@/src/ErrorBoundary';
+import {
+  cancelDailyNotification, getSavedNotificationTime,
+  isNotificationsSupported,
+  requestNotificationPermission, scheduleDailyNotification,
+  setupNotificationHandler,
+} from '@/src/notifications';
+import { C, FONT } from '@/src/theme';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import * as Sharing from 'expo-sharing';
+import { useEffect, useState } from 'react';
 import {
-  requestNotificationPermission,
-  scheduleDailyNotification,
-  cancelDailyNotification,
-  getSavedNotificationTime,
-  setupNotificationHandler,
-  isNotificationsSupported,
-} from '@/src/notifications';
-import { AppHeader } from '@/app/_layout';
-import { ErrorBoundary } from '@/src/ErrorBoundary';
-import { exportAllData, importAllData, getStreakOffset, setStreakOffset, deleteAllData, populateDummyData, resetWithDummyData } from '@/src/db';
+  Alert, Platform,
+  ScrollView,
+  StyleSheet, Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
 export default function SettingsScreen() {
-  const [notifEnabled, setNotifEnabled] = useState(false);
-  const [notifTime, setNotifTime] = useState(new Date(new Date().setHours(18, 0, 0, 0)));
-  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [notifEnabled,    setNotifEnabled]    = useState(false);
+  const [notifTime,       setNotifTime]       = useState(new Date(new Date().setHours(18, 0, 0, 0)));
+  const [showTimePicker,  setShowTimePicker]  = useState(false);
+  const [streakOffsetTxt, setStreakOffsetTxt] = useState('0');
+  const [streakSaved,     setStreakSaved]     = useState(false);
   const notifSupported = isNotificationsSupported();
-  const [streakOffsetText, setStreakOffsetText] = useState('0');
-  const [streakSaved, setStreakSaved] = useState(false);
 
   useEffect(() => {
     setupNotificationHandler();
     getSavedNotificationTime().then(t => {
       if (t) {
         setNotifEnabled(true);
-        const d = new Date();
-        d.setHours(t.hour, t.minute, 0, 0);
-        setNotifTime(d);
+        setNotifTime(prev => { const d = new Date(prev); d.setHours(t.hour, t.minute, 0, 0); return d; });
       }
     });
-    getStreakOffset().then(v => setStreakOffsetText(String(v)));
+    getStreakOffset().then(v => setStreakOffsetTxt(String(v)));
   }, []);
 
-  function handleDeleteAllData() {
-    Alert.alert(
-      '⚠️ Delete All Data',
-      'This will permanently remove ALL workouts, exercises, sessions and sets. This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete Everything',
-          style: 'destructive',
-          onPress: () => {
-            Alert.alert(
-              'Are you absolutely sure?',
-              'All your workout history will be lost forever.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Yes, delete all', style: 'destructive', onPress: () => { deleteAllData(); Alert.alert('Done', 'All data has been deleted.'); } },
-              ]
-            );
-          },
-        },
-      ]
-    );
-  }
-
-  function handlePopulateDummy() {
-    Alert.alert(
-      'Demo Data',
-      'Choose how to load the sample data.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Add to existing',
-          onPress: () => {
-            populateDummyData();
-            Alert.alert('Done', 'Demo data added. Reload the app to see it everywhere.');
-          },
-        },
-        {
-          text: 'Reset & replace all data',
-          style: 'destructive',
-          onPress: () => {
-            Alert.alert(
-              'Replace all data?',
-              'Your existing workout history will be permanently deleted and replaced with demo data.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Yes, reset',
-                  style: 'destructive',
-                  onPress: () => {
-                    resetWithDummyData();
-                    Alert.alert('Done', 'All data replaced with demo data. Reload the app.');
-                  },
-                },
-              ]
-            );
-          },
-        },
-      ]
-    );
-  }
-
-  async function saveStreakOffset() {
-    const n = parseInt(streakOffsetText) || 0;
-    await setStreakOffset(Math.max(0, n));
-    setStreakSaved(true);
-    setTimeout(() => setStreakSaved(false), 2000);
-  }
+  // ── Notifications ───────────────────────────────────────────────────────────
 
   async function toggleNotifications(value: boolean) {
     if (value) {
@@ -117,29 +59,35 @@ export default function SettingsScreen() {
         return;
       }
       await scheduleDailyNotification(notifTime.getHours(), notifTime.getMinutes());
-      setNotifEnabled(true);
     } else {
       await cancelDailyNotification();
-      setNotifEnabled(false);
     }
+    setNotifEnabled(value);
   }
 
-  async function handleTimeChange(_: any, date?: Date) {
+  async function handleTimeChange(_: unknown, date?: Date) {
     setShowTimePicker(Platform.OS === 'ios');
-    if (date) {
-      setNotifTime(date);
-      if (notifEnabled) {
-        await scheduleDailyNotification(date.getHours(), date.getMinutes());
-      }
-    }
+    if (!date) return;
+    setNotifTime(date);
+    if (notifEnabled) await scheduleDailyNotification(date.getHours(), date.getMinutes());
   }
+
+  // ── Streak ──────────────────────────────────────────────────────────────────
+
+  async function saveStreakOffset() {
+    const n = Math.max(0, parseInt(streakOffsetTxt) || 0);
+    await setStreakOffset(n);
+    setStreakSaved(true);
+    setTimeout(() => setStreakSaved(false), 2000);
+  }
+
+  // ── Export / Import ─────────────────────────────────────────────────────────
 
   async function handleExport() {
     try {
-      const data = exportAllData();
-      const json = JSON.stringify(data, null, 2);
+      const json     = JSON.stringify(exportAllData(), null, 2);
       const filename = `workout-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      const path = FileSystem.documentDirectory + filename;
+      const path     = FileSystem.documentDirectory + filename;
       await FileSystem.writeAsStringAsync(path, json, { encoding: FileSystem.EncodingType.UTF8 });
       await Sharing.shareAsync(path, { mimeType: 'application/json', dialogTitle: 'Export Workout Data' });
     } catch (e) {
@@ -152,202 +100,251 @@ export default function SettingsScreen() {
       const result = await DocumentPicker.getDocumentAsync({ type: 'application/json' });
       if (result.canceled) return;
       const content = await FileSystem.readAsStringAsync(result.assets[0].uri);
-      const data = JSON.parse(content);
+      const data    = JSON.parse(content);
       Alert.alert(
         'Import Data',
-        'This will REPLACE all current data. Are you sure?',
+        'This will replace all current data. Are you sure?',
         [
           { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Replace', style: 'destructive', onPress: () => {
+          { text: 'Replace', style: 'destructive', onPress: () => {
               importAllData(data);
-              Alert.alert('Imported!', 'Your data has been restored.');
+              Alert.alert('Imported', 'Your data has been restored.');
             }
           },
         ]
       );
-    } catch (e) {
+    } catch {
       Alert.alert('Import failed', "The file could not be read. Make sure it's a valid backup.");
     }
+  }
+
+  // ── Developer ───────────────────────────────────────────────────────────────
+
+  function handleDeleteAll() {
+    Alert.alert(
+      '⚠️ Delete All Data',
+      'Permanently removes ALL workouts, exercises, sessions and sets. Cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete Everything', style: 'destructive', onPress: () =>
+            Alert.alert('Are you absolutely sure?', 'All workout history will be lost forever.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Yes, delete all', style: 'destructive', onPress: () => {
+                  deleteAllData();
+                  Alert.alert('Done', 'All data has been deleted.');
+                }
+              },
+            ])
+        },
+      ]
+    );
+  }
+
+  function handleDemoData() {
+    Alert.alert('Demo Data', 'Choose how to load the sample data.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Add to existing', onPress: () => {
+          populateDummyData();
+          Alert.alert('Done', 'Demo data added.');
+        }
+      },
+      { text: 'Reset & replace all', style: 'destructive', onPress: () =>
+          Alert.alert('Replace all data?', 'Existing history will be permanently deleted.', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Yes, reset', style: 'destructive', onPress: () => {
+                resetWithDummyData();
+                Alert.alert('Done', 'All data replaced with demo data.');
+              }
+            },
+          ])
+      },
+    ]);
   }
 
   const timeStr = notifTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   return (
     <ErrorBoundary fallbackLabel="Something went wrong in Settings.">
-    <View style={{ flex: 1, backgroundColor: '#000' }}>
-      <StatusBar barStyle="light-content" />
-      <AppHeader title="Settings" />
-      <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
+      <View style={s.container}>
+        <AppHeader title="Settings" />
+        <ScrollView contentContainerStyle={s.scroll}>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Daily Reminder</Text>
-        {!notifSupported ? (
-          <View style={styles.row}>
-            <View style={styles.rowLeft}>
-              <Text style={styles.rowTitle}>Notifications unavailable in Expo Go</Text>
-              <Text style={styles.rowSub}>Build with EAS to enable this feature.</Text>
-            </View>
-            <Text style={styles.lockedIcon}>🔒</Text>
-          </View>
-        ) : (
-          <>
-            <View style={styles.row}>
-              <View style={styles.rowLeft}>
-                <Text style={styles.rowTitle}>Enable daily notification</Text>
-                <Text style={styles.rowSub}>Reminds you to log your workout</Text>
+          {/* Daily reminder */}
+          <Section title="Daily Reminder">
+            {!notifSupported ? (
+              <Row>
+                <Text style={s.rowTitle}>Notifications unavailable in Expo Go</Text>
+                <Text style={s.rowSub}>Build with EAS to enable this feature.</Text>
+                <Text style={s.lock}>🔒</Text>
+              </Row>
+            ) : (
+              <>
+                <Row>
+                  <View style={s.rowLeft}>
+                    <Text style={s.rowTitle}>Enable daily reminder</Text>
+                    <Text style={s.rowSub}>Reminds you to log your workout</Text>
+                  </View>
+                  <Switch
+                    value={notifEnabled}
+                    onValueChange={toggleNotifications}
+                    trackColor={{ false: C.borderMid, true: C.purple }}
+                    thumbColor={C.white}
+                  />
+                </Row>
+                {notifEnabled && (
+                  <TouchableOpacity style={s.row} onPress={() => setShowTimePicker(true)}>
+                    <Text style={s.rowTitle}>Reminder time</Text>
+                    <Text style={s.timeVal}>{timeStr}</Text>
+                  </TouchableOpacity>
+                )}
+                {showTimePicker && (
+                  <DateTimePicker
+                    value={notifTime}
+                    mode="time"
+                    is24Hour
+                    onChange={handleTimeChange}
+                  />
+                )}
+              </>
+            )}
+          </Section>
+
+          {/* Data management */}
+          <Section title="Data Management">
+            <TouchableOpacity style={s.actionRow} onPress={handleExport}>
+              <Text style={s.actionEmoji}>📤</Text>
+              <View>
+                <Text style={s.rowTitle}>Export Data</Text>
+                <Text style={s.rowSub}>Save a JSON backup to share or store</Text>
               </View>
-              <Switch
-                value={notifEnabled}
-                onValueChange={toggleNotifications}
-                trackColor={{ false: '#1a1a2a', true: '#6C63FF' }}
-                thumbColor="#fff"
-              />
+            </TouchableOpacity>
+            <TouchableOpacity style={s.actionRow} onPress={handleImport}>
+              <Text style={s.actionEmoji}>📥</Text>
+              <View>
+                <Text style={s.rowTitle}>Import Data</Text>
+                <Text style={s.rowSub}>Restore from a previous backup</Text>
+              </View>
+            </TouchableOpacity>
+          </Section>
+
+          {/* Streak bonus */}
+          <Section title="Streak">
+            <View style={[s.row, { flexDirection: 'column', alignItems: 'flex-start', gap: 10 }]}>
+              <View>
+                <Text style={s.rowTitle}>Starting streak bonus</Text>
+                <Text style={s.rowSub}>Add days if you were already on a streak before using this app</Text>
+              </View>
+              <View style={s.streakRow}>
+                <TextInput
+                  style={s.streakInput}
+                  value={streakOffsetTxt}
+                  onChangeText={setStreakOffsetTxt}
+                  keyboardType="number-pad"
+                  placeholder="0"
+                  placeholderTextColor={C.textMuted}
+                />
+                <TouchableOpacity
+                  style={[s.streakBtn, streakSaved && s.streakBtnSaved]}
+                  onPress={saveStreakOffset}
+                >
+                  <Text style={s.streakBtnText}>{streakSaved ? '✓ Saved' : 'Set'}</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-            {notifEnabled && (
-              <TouchableOpacity style={styles.timeRow} onPress={() => setShowTimePicker(true)}>
-                <Text style={styles.rowTitle}>Reminder time</Text>
-                <Text style={styles.timeText}>{timeStr}</Text>
-              </TouchableOpacity>
-            )}
-            {showTimePicker && (
-              <DateTimePicker
-                value={notifTime}
-                mode="time"
-                is24Hour={true}
-                onChange={handleTimeChange}
-              />
-            )}
-          </>
-        )}
-      </View>
+          </Section>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Data Management</Text>
-        <TouchableOpacity style={styles.actionBtn} onPress={handleExport}>
-          <Text style={styles.actionIcon}>📤</Text>
-          <View>
-            <Text style={styles.rowTitle}>Export Data</Text>
-            <Text style={styles.rowSub}>Save a JSON backup to share or store</Text>
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.actionBtn} onPress={handleImport}>
-          <Text style={styles.actionIcon}>📥</Text>
-          <View>
-            <Text style={styles.rowTitle}>Import Data</Text>
-            <Text style={styles.rowSub}>Restore from a previous backup</Text>
-          </View>
-        </TouchableOpacity>
-      </View>
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Streak</Text>
-        <View style={styles.row}>
-          <View style={styles.rowLeft}>
-            <Text style={styles.rowTitle}>Starting streak bonus</Text>
-            <Text style={styles.rowSub}>Add days if you were already on a streak before using this app</Text>
-          </View>
-        </View>
-        <View style={styles.streakRow}>
-          <TextInput
-            style={styles.streakInput}
-            value={streakOffsetText}
-            onChangeText={setStreakOffsetText}
-            keyboardType="number-pad"
-            placeholder="0"
-            placeholderTextColor="#555"
-          />
-          <TouchableOpacity style={[styles.streakSaveBtn, streakSaved && styles.streakSavedBtn]} onPress={saveStreakOffset}>
-            <Text style={styles.streakSaveBtnText}>{streakSaved ? '✓ Saved' : 'Set'}</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+          {/* Developer */}
+          <Section title="Developer">
+            <TouchableOpacity style={s.actionRow} onPress={handleDemoData}>
+              <Text style={s.actionEmoji}>🧪</Text>
+              <View>
+                <Text style={s.rowTitle}>Demo Data</Text>
+                <Text style={s.rowSub}>Load 8 weeks of sample workouts for testing</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity style={[s.actionRow, s.dangerRow]} onPress={handleDeleteAll}>
+              <Text style={s.actionEmoji}>🗑️</Text>
+              <View>
+                <Text style={[s.rowTitle, { color: C.red }]}>Delete All Data</Text>
+                <Text style={s.rowSub}>Permanently remove all workouts and history</Text>
+              </View>
+            </TouchableOpacity>
+          </Section>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Developer</Text>
-        <TouchableOpacity style={styles.dangerBtn} onPress={handlePopulateDummy}>
-          <Text style={styles.dangerIcon}>🧪</Text>
-          <View>
-            <Text style={styles.rowTitle}>Populate Dummy Data</Text>
-            <Text style={styles.rowSub}>Add 8 weeks of sample workouts for testing</Text>
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.dangerBtn, styles.dangerBtnRed]} onPress={handleDeleteAllData}>
-          <Text style={styles.dangerIcon}>🗑️</Text>
-          <View>
-            <Text style={[styles.rowTitle, { color: '#ff4444' }]}>Delete All Data</Text>
-            <Text style={styles.rowSub}>Permanently remove all workouts and history</Text>
-          </View>
-        </TouchableOpacity>
-      </View>
+          {/* About */}
+          <Section title="About">
+            <View style={s.aboutCard}>
+              <Text style={s.appName}>💪 WorkoutTracker</Text>
+              <Text style={s.aboutSub}>Built with React Native + Expo, alongside Claude Sonnet 4.6</Text>
+              <Text style={s.aboutSub}>All data stored locally on your device</Text>
+            </View>
+          </Section>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>About</Text>
-        <View style={styles.aboutCard}>
-          <Text style={styles.appName}>💪 WorkoutTracker</Text>
-          <Text style={styles.aboutSub}>Built with React Native + Expo</Text>
-          <Text style={styles.aboutSub}>All data stored locally on your device</Text>
-        </View>
+          <View style={{ height: 40 }} />
+        </ScrollView>
       </View>
-
-    </ScrollView>
-    </View>
     </ErrorBoundary>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
-  scroll: { padding: 16, gap: 16, paddingBottom: 40 },
+// ── Small layout helpers ────────────────────────────────────────────────────────
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={s.section}>
+      <Text style={s.sectionTitle}>{title}</Text>
+      {children}
+    </View>
+  );
+}
+
+function Row({ children }: { children: React.ReactNode }) {
+  return <View style={s.row}>{children}</View>;
+}
+
+// ── Styles ─────────────────────────────────────────────────────────────────────
+
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: C.bg },
+  scroll:    { padding: 16, gap: 14, paddingBottom: 50 },
+
   section: {
-    backgroundColor: '#0a0a0a', borderRadius: 14,
-    borderWidth: 1, borderColor: '#1a1a2a', overflow: 'hidden',
+    backgroundColor: C.bgCard, borderRadius: 14,
+    borderWidth: 1, borderColor: C.borderMid, overflow: 'hidden',
   },
   sectionTitle: {
-    color: '#6C63FF', fontSize: 13, fontWeight: '700',
-    paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4, letterSpacing: 0.5,
+    color: C.purple, fontSize: FONT.base, fontWeight: '700', letterSpacing: 0.5,
+    paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4,
   },
+
   row: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    padding: 16, borderTopWidth: 1, borderTopColor: '#1a1a2a',
+    padding: 16, borderTopWidth: 1, borderTopColor: C.borderMid,
   },
-  rowLeft: { flex: 1, marginRight: 12 },
-  rowTitle: { color: '#fff', fontSize: 15, fontWeight: '500' },
-  rowSub: { color: '#666', fontSize: 13, marginTop: 2, lineHeight: 18 },
-  lockedIcon: { fontSize: 20 },
-  timeRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    padding: 16, borderTopWidth: 1, borderTopColor: '#1a1a2a',
-  },
-  timeText: { color: '#6C63FF', fontSize: 18, fontWeight: '700' },
-  actionBtn: {
+  rowLeft:  { flex: 1, marginRight: 12 },
+  rowTitle: { color: C.white, fontSize: FONT.lg, fontWeight: '500' },
+  rowSub:   { color: '#666', fontSize: FONT.base, marginTop: 2, lineHeight: 18 },
+  lock:     { fontSize: 20 },
+  timeVal:  { color: C.purple, fontSize: 18, fontWeight: '700' },
+
+  actionRow: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    padding: 16, borderTopWidth: 1, borderTopColor: '#1a1a2a',
+    padding: 16, borderTopWidth: 1, borderTopColor: C.borderMid,
   },
-  actionIcon: { fontSize: 24 },
-  aboutCard: { padding: 20, alignItems: 'center', gap: 6 },
-  appName: { color: '#fff', fontSize: 20, fontWeight: '800' },
-  aboutSub: { color: '#666', fontSize: 13 },
-  streakRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingBottom: 14,
-  },
-  streakInput: {
-    width: 80, backgroundColor: '#000', color: '#fff', borderRadius: 10,
+  actionEmoji: { fontSize: 24 },
+  dangerRow:   { backgroundColor: '#0d0606', borderTopColor: '#2a1111' },
+
+  streakRow:    { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  streakInput:  {
+    width: 80, backgroundColor: C.bg, color: C.white, borderRadius: 10,
     padding: 12, fontSize: 20, fontWeight: '700', textAlign: 'center',
-    borderWidth: 1, borderColor: '#1a1a2a',
+    borderWidth: 1, borderColor: C.borderMid,
   },
-  streakSaveBtn: {
-    backgroundColor: '#6C63FF', paddingHorizontal: 20, paddingVertical: 13,
-    borderRadius: 10,
-  },
-  streakSavedBtn: { backgroundColor: '#22c55e' },
-  streakSaveBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  dangerBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    paddingHorizontal: 16, paddingVertical: 14,
-    borderRadius: 12, marginBottom: 8, backgroundColor: '#0a0a0a',
-    borderWidth: 1, borderColor: '#111',
-  },
-  dangerBtnRed: { borderColor: '#2a1111', backgroundColor: '#0d0606' },
-  dangerIcon: { fontSize: 22 },
+  streakBtn:     { backgroundColor: C.purple, paddingHorizontal: 20, paddingVertical: 13, borderRadius: 10 },
+  streakBtnSaved:{ backgroundColor: C.green },
+  streakBtnText: { color: C.white, fontWeight: '700', fontSize: FONT.md },
+
+  aboutCard: { padding: 20, alignItems: 'center', gap: 6 },
+  appName:   { color: C.white, fontSize: 20, fontWeight: '800' },
+  aboutSub:  { color: '#666', fontSize: FONT.base },
 });

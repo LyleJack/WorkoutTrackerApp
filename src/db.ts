@@ -1,5 +1,5 @@
-import * as SQLite from 'expo-sqlite';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SQLite from 'expo-sqlite';
 
 const db = SQLite.openDatabaseSync('workouttracker.db');
 

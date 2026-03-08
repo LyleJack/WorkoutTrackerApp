@@ -7,6 +7,8 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { AppHeader } from '@/app/_layout';
 import { ErrorBoundary } from '@/src/ErrorBoundary';
 import { Ionicons } from '@expo/vector-icons';
+import { C, FONT } from '@/src/theme';
+import { formatDuration, formatSessionDate } from '@/src/utils';
 import {
   getHistory, getSessionDetails, deleteSession,
   updateSessionNotes, updateSetFull, deleteSet,
@@ -286,9 +288,7 @@ function HistoryScreenInner() {
   const dates = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
 
   function formatDate(d: string) {
-    return new Date(d + 'T12:00:00').toLocaleDateString('en-GB', {
-      weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
-    });
+    return formatSessionDate(d);
   }
 
   // Group sets by exercise for the detail view
@@ -477,9 +477,7 @@ function HistoryScreenInner() {
                       </Text>
                       {session.duration_seconds && session.duration_seconds > 0 ? (
                         <Text style={styles.sessionDuration}>
-                          {session.duration_seconds >= 3600
-                            ? `${Math.floor(session.duration_seconds / 3600)}h ${Math.floor((session.duration_seconds % 3600) / 60)}m`
-                            : `${Math.floor(session.duration_seconds / 60)}m`}
+                          {formatDuration(session.duration_seconds)}
                         </Text>
                       ) : null}
                     </View>
