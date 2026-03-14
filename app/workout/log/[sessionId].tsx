@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, KeyboardAvoidingView, Platform,
+  StyleSheet, KeyboardAvoidingView, Platform, AppState,
   Modal, FlatList, Vibration, Animated, PanResponder,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -13,9 +13,12 @@ import {
   getExercises, addSet, getSetsForSession, deleteSet,
   getLastSetForExercise, saveLastSessionTime, saveSessionDuration, getWorkouts,
   addExercise, reorderExercises, hideExercise, unhideExercise, getHiddenExercises,
-  Exercise, Set,
+  getPref, getRoutine, getRoutineDays, getRoutineProgress, updateRoutineProgress,
+  resumeRoutine,
+  Exercise, Set as WorkoutSet,
 } from '@/src/db';
 import { ErrorBoundary } from '@/src/ErrorBoundary';
+import { FloatingTimer as NativeFloatingTimer } from '@/src/floatingTimer';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -40,7 +43,7 @@ const COL_WEIGHT         = 72;
 const COL_REPS           = 54;
 
 type Draft        = { weight: string; reps: string; comment: string; durationSecs: number };
-type ExerciseSets = { exercise: Exercise; sets: Set[] };
+type ExerciseSets = { exercise: Exercise; sets: WorkoutSet[] };
 
 // ─── Nice confirmation modal (replaces Alert) ─────────────────────────────────
 
@@ -92,7 +95,7 @@ function AddExerciseModal({
   }
   return (
     <Modal visible={visible} transparent animationType="slide">
-      <View style={ae.overlay}>
+      <KeyboardAvoidingView style={ae.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
         <TouchableOpacity style={ae.backdrop} activeOpacity={1} onPress={onDismiss} />
         <View style={ae.box}>
           <View style={ae.handle} />
@@ -136,7 +139,7 @@ function AddExerciseModal({
             <Text style={ae.btnText}>Add to Workout</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -144,7 +147,7 @@ function AddExerciseModal({
 // ─── Swipeable set row ────────────────────────────────────────────────────────
 
 function SwipeableSetRow({ s, onDelete }: {
-  s: Set & { exercise_name?: string };
+  s: WorkoutSet & { exercise_name?: string };
   onDelete: () => void;
 }) {
   const translateX = useRef(new Animated.Value(0)).current;
@@ -274,14 +277,17 @@ function ElapsedTimer({ startTime, stopped }: { startTime: number; stopped?: boo
 
 // ─── Arc rest timer ───────────────────────────────────────────────────────────
 
-function ArcTimer({ remaining, total, color }: { remaining: number; total: number; color: string }) {
+function ArcTimer({ remaining, total, color, size = 72, strokeWidth = 6 }: { remaining: number; total: number; color: string; size?: number; strokeWidth?: number }) {
+  const r    = (size / 2) - strokeWidth;
+  const circ = 2 * Math.PI * r;
   const pct  = total > 0 ? remaining / total : 0;
-  const dash = pct * ARC_CIRC;
+  const dash = pct * circ;
+  const cx   = size / 2;
   return (
-    <Svg width={72} height={72} style={{ transform: [{ rotate: '-90deg' }] }}>
-      <Circle cx={36} cy={36} r={ARC_R} stroke="#0f0f0f" strokeWidth={6} fill="none" />
-      <Circle cx={36} cy={36} r={ARC_R} stroke={color} strokeWidth={6} fill="none"
-        strokeDasharray={`${dash} ${ARC_CIRC}`} strokeLinecap="round" />
+    <Svg width={size} height={size} style={{ transform: [{ rotate: '-90deg' }] }}>
+      <Circle cx={cx} cy={cx} r={r} stroke="#0f0f0f" strokeWidth={strokeWidth} fill="none" />
+      <Circle cx={cx} cy={cx} r={r} stroke={color} strokeWidth={strokeWidth} fill="none"
+        strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" />
     </Svg>
   );
 }
@@ -294,6 +300,7 @@ function FloatingTimer({ timerKey, onDismiss }: { timerKey: number; onDismiss: (
   const [running,        setRunning]        = useState(true);
   const [vibrateEnabled, setVibrateEnabled] = useState(true);
   const [expanded,       setExpanded]       = useState(false);
+  const [floatingModal,  setFloatingModal]  = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startRef    = useRef(Date.now());
   const totalRef    = useRef(90);
@@ -321,17 +328,65 @@ function FloatingTimer({ timerKey, onDismiss }: { timerKey: number; onDismiss: (
       if (left === 0) {
         clearInterval(intervalRef.current!);
         setRunning(false);
-        if (vibrateEnabled) Vibration.vibrate([0, 350, 150, 350]);
+        // Persistent vibration pattern: 3 pulses
+        if (vibrateEnabled) Vibration.vibrate([0, 400, 200, 400, 200, 400]);
       }
     }, 200);
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [running, vibrateEnabled]);
+
+  // ─── Background timer notification ───────────────────────────────────────────
+  // When the app goes to background while the rest timer is running, schedule
+  // a notification to fire at the exact moment the timer would expire.
+  // When the user returns to the app, cancel any pending notification.
+  const bgNotifIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const cancelBgNotif = async () => {
+      try {
+        if (bgNotifIdRef.current) {
+          const N = (await import('expo-notifications')).default;
+          await N.cancelScheduledNotificationAsync(bgNotifIdRef.current).catch(() => {});
+          bgNotifIdRef.current = null;
+        }
+      } catch {}
+    };
+
+    const sub = AppState.addEventListener('change', async (nextState) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        if (!running || remaining <= 0) return;
+        try {
+          await cancelBgNotif(); // cancel any previous
+          const N = (await import('expo-notifications'));
+          const id = await N.default.scheduleNotificationAsync({
+            content: {
+              title: '⏱️ Rest complete!',
+              body: 'Time to get back to your workout.',
+              sound: true,
+            },
+            trigger: {
+              type: N.SchedulableTriggerInputTypes.TIME_INTERVAL,
+              seconds: Math.max(1, remaining),
+            },
+          });
+          bgNotifIdRef.current = id;
+        } catch {}
+      } else if (nextState === 'active') {
+        await cancelBgNotif();
+      }
+    });
+
+    return () => {
+      sub.remove();
+      cancelBgNotif();
+    };
+  }, [running, remaining]);
 
   async function changePreset(secs: number) {
     totalRef.current = secs;
     setTotalSeconds(secs); setRemaining(secs);
     setRunning(true); startRef.current = Date.now();
     await AsyncStorage.setItem(TIMER_DURATION_KEY, String(secs));
+    NativeFloatingTimer.update(secs);
   }
   async function toggleVibrate() {
     const next = !vibrateEnabled;
@@ -349,8 +404,8 @@ function FloatingTimer({ timerKey, onDismiss }: { timerKey: number; onDismiss: (
   const timeStr  = `${mins}:${String(secs).padStart(2, '0')}`;
   const arcColor = done ? '#22c55e' : running ? '#6C63FF' : '#f59e0b';
 
-  return (
-    <View style={ft.wrapper}>
+  const timerContent = (
+    <>
       {expanded && (
         <View style={ft.panel}>
           <View style={ft.presets}>
@@ -386,12 +441,49 @@ function FloatingTimer({ timerKey, onDismiss }: { timerKey: number; onDismiss: (
           <TouchableOpacity style={ft.iconBtn} onPress={() => setExpanded(e => !e)}>
             <Ionicons name={expanded ? 'chevron-up' : 'options-outline'} size={15} color="#444" />
           </TouchableOpacity>
+          {/* Pop-out / pin button — shows timer as overlay above everything */}
+          <TouchableOpacity style={ft.iconBtn} onPress={() => setFloatingModal(true)}>
+            <Ionicons name="expand-outline" size={15} color="#444" />
+          </TouchableOpacity>
           <TouchableOpacity style={ft.iconBtn} onPress={onDismiss}>
             <Ionicons name="close" size={15} color="#333" />
           </TouchableOpacity>
         </View>
       </View>
-    </View>
+    </>
+  );
+
+  return (
+    <>
+      <View style={ft.wrapper}>{timerContent}</View>
+
+      {/* Pop-out floating modal — stays visible when scrolling */}
+      <Modal visible={floatingModal} transparent animationType="fade" statusBarTranslucent>
+        <View style={ft.floatOverlay}>
+          <TouchableOpacity style={ft.floatBackdrop} activeOpacity={1} onPress={() => setFloatingModal(false)} />
+          <View style={ft.floatBox}>
+            <View style={ft.floatArcWrap}>
+              <ArcTimer remaining={remaining} total={totalSeconds} color={arcColor} size={100} strokeWidth={8} />
+              <View style={ft.floatArcOverlay}>
+                <Text style={[ft.floatTime, { color: arcColor }]}>{done ? '✓' : timeStr}</Text>
+              </View>
+            </View>
+            <Text style={[ft.floatStatus, { color: arcColor }]}>
+              {done ? '✅ Rest complete!' : running ? 'Resting…' : 'Paused'}
+            </Text>
+            <TouchableOpacity style={[ft.floatBtn, { borderColor: arcColor + '66' }]} onPress={handleArcTap}>
+              <Ionicons name={done ? 'refresh' : running ? 'pause' : 'play'} size={18} color={arcColor} />
+              <Text style={[ft.floatBtnText, { color: arcColor }]}>
+                {done ? 'Restart' : running ? 'Pause' : 'Resume'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={ft.floatClose} onPress={() => setFloatingModal(false)}>
+              <Text style={ft.floatCloseText}>Back to workout</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
@@ -491,6 +583,7 @@ function LogScreenInner() {
     setFinished(false);
     finishedRef.current = false;
     setTimerVisible(false);
+    NativeFloatingTimer.hide(); // dismiss overlay bubble
     setTimerKey(0);
     setCheckedSets({});
     setCollapsed({});
@@ -505,6 +598,23 @@ function LogScreenInner() {
     const hidden    = getHiddenExercises(Number(workoutId));
     setHiddenExercises(hidden);
     const sets      = getSetsForSession(Number(sessionId));
+
+    // Bug fix: detect sets whose exercise was deleted from the workout.
+    // If a user deletes an exercise while a session is still "active" (within 15 min),
+    // then navigates back, those sets are orphaned. We unhide/restore them so the
+    // session data stays intact and shows in history.
+    const exerciseIds = new Set(exercises.map(e => e.id));
+    const orphanedExIds = [...new Set(sets.filter(s => !exerciseIds.has(s.exercise_id)).map(s => s.exercise_id))];
+    if (orphanedExIds.length > 0) {
+      orphanedExIds.forEach(id => { try { unhideExercise(id); } catch {} });
+      // Reload exercises now that we've unhidden them
+      const restored = getExercises(Number(workoutId));
+      const restoredIds = new Set(restored.map(e => e.id));
+      // For any still-missing (truly deleted), skip gracefully
+      setData(restored.map(e => ({ exercise: e, sets: sets.filter(s => s.exercise_id === e.id) })));
+      return;
+    }
+
     setData(exercises.map(e => ({
       exercise: e,
       sets: sets.filter(s => s.exercise_id === e.id),
@@ -592,6 +702,10 @@ function LogScreenInner() {
     setTimeout(() => setFlashId(null), 600);
     setTimerKey(k => k + 1);
     setTimerVisible(true);
+    AsyncStorage.getItem(TIMER_DURATION_KEY).then(dur => {
+      const secs = dur ? parseInt(dur) : 90;
+      NativeFloatingTimer.show(secs);
+    });
   }
 
   function handleDeleteSet(id: number) {
@@ -668,16 +782,41 @@ function LogScreenInner() {
     setTimerVisible(false);
     const durationSeconds = Math.floor((Date.now() - startTime.current) / 1000);
     saveSessionDuration(Number(sessionId), durationSeconds);
-    const workouts = getWorkouts();
-    const w = workouts.find(w => w.id === Number(workoutId));
+    const allWorkouts = getWorkouts();
+    const w = allWorkouts.find(w => w.id === Number(workoutId));
     if (w) await saveLastSessionTime(Number(sessionId), w.id, w.name, w.is_cardio, true);
-    router.replace('/');
+
+    // Advance routine day counter if a routine is active
+    // Uses static imports — dynamic import('@/src/db') is unreliable on Hermes
+    try {
+      const routine = getRoutine();
+      if (routine) {
+        const days = getRoutineDays(routine.id);
+        if (days.length) {
+          const cur = (await getRoutineProgress()) % days.length;
+          updateRoutineProgress(cur + 1);
+          // Also clear any pause so next open auto-navigates correctly
+          await resumeRoutine();
+        }
+      }
+    } catch (e) {
+      console.warn('[finishWorkout] routine advance failed:', e);
+    }
+
+    // Go to summary screen unless the user disabled it
+    const showSummary = getPref('show_summary') !== 'false';
+    if (showSummary && data.length > 0) {
+      router.replace(`/workout/summary/${sessionId}`);
+    } else {
+      router.replace('/');
+    }
   }
 
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
     >
       {/* Confirm delete modal */}
       <ConfirmModal
@@ -727,11 +866,11 @@ function LogScreenInner() {
 
       {/* ── Rest timer ── */}
       {timerVisible && (
-        <FloatingTimer timerKey={timerKey} onDismiss={() => setTimerVisible(false)} />
+        <FloatingTimer timerKey={timerKey} onDismiss={() => { setTimerVisible(false); NativeFloatingTimer.hide(); }} />
       )}
 
       {/* ── Exercise cards ── */}
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}>
         {data.map(({ exercise, sets }, idx) => {
           const draft       = drafts[exercise.id] ?? { weight: '0', reps: '1', comment: '', durationSecs: 30 };
           const weightVal   = parseFloat(draft.weight) || 0;
@@ -1021,6 +1160,18 @@ const ft = StyleSheet.create({
   controlText:{ fontSize: 12, fontWeight: '600' },
   actions:    { gap: 8 },
   iconBtn:    { width: 32, height: 32, borderRadius: 16, backgroundColor: '#0d0d16', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#111' },
+  // Pop-out floating modal
+  floatOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', alignItems: 'center', justifyContent: 'center' },
+  floatBackdrop:{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  floatBox:     { backgroundColor: '#09090f', borderRadius: 28, padding: 32, alignItems: 'center', gap: 20, borderWidth: 1, borderColor: '#1a1a2a', minWidth: 260 },
+  floatArcWrap: { width: 120, height: 120, alignItems: 'center', justifyContent: 'center' },
+  floatArcOverlay: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
+  floatTime:    { fontSize: 28, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  floatStatus:  { fontSize: 16, fontWeight: '700' },
+  floatBtn:     { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 20, borderWidth: 1 },
+  floatBtnText: { fontSize: 15, fontWeight: '700' },
+  floatClose:   { paddingVertical: 8 },
+  floatCloseText: { color: '#444', fontSize: 14 },
 });
 
 const pk = StyleSheet.create({

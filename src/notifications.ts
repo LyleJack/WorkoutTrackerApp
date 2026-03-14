@@ -1,27 +1,49 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 
-const IS_EXPO_GO = Constants.executionEnvironment === 'storeClient';
+// Expo Go (SDK 53+) removed push notification support.
+// We must avoid importing expo-notifications entirely in Expo Go,
+// because it auto-registers for push tokens at module load time and throws.
+// appOwnership === 'expo' means running inside Expo Go.
+const IS_EXPO_GO =
+  Constants.appOwnership === 'expo' ||
+  Constants.executionEnvironment === 'storeClient';
 
-const NOTIF_ID_KEY = 'daily_notif_id';
+const NOTIF_ID_KEY   = 'daily_notif_id';
 const NOTIF_TIME_KEY = 'daily_notif_time';
 
+// Lazily import expo-notifications only when not in Expo Go
 async function getNotifications() {
   if (IS_EXPO_GO) return null;
-  return await import('expo-notifications');
+  try {
+    return await import('expo-notifications');
+  } catch {
+    return null;
+  }
 }
 
 export async function setupNotificationHandler() {
   const Notifications = await getNotifications();
   if (!Notifications) return;
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-      shouldShowBanner: true,
-      shouldShowList: true,
-    }),
+    handleNotification: async (notification: any) => {
+      const checkToday = notification.request.content.data?.checkWorkoutToday;
+      if (checkToday) {
+        try {
+          const { hasWorkoutToday } = await import('@/src/db');
+          if (hasWorkoutToday()) {
+            return { shouldShowAlert: false, shouldPlaySound: false, shouldSetBadge: false, shouldShowBanner: false, shouldShowList: false };
+          }
+        } catch {}
+      }
+      return {
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      };
+    },
   });
 }
 
@@ -37,13 +59,14 @@ export async function scheduleDailyNotification(hour: number, minute: number) {
   if (!Notifications) return null;
 
   const existing = await AsyncStorage.getItem(NOTIF_ID_KEY);
-  if (existing) await Notifications.cancelScheduledNotificationAsync(existing);
+  if (existing) await Notifications.cancelScheduledNotificationAsync(existing).catch(() => {});
 
   const id = await Notifications.scheduleNotificationAsync({
     content: {
       title: '💪 Workout time!',
-      body: "Don't forget to log today's workout.",
+      body:  "Don't forget to log today's workout.",
       sound: true,
+      data:  { checkWorkoutToday: true },
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DAILY,

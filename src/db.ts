@@ -1,5 +1,5 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SQLite from 'expo-sqlite';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const db = SQLite.openDatabaseSync('workouttracker.db');
 
@@ -68,6 +68,24 @@ export function initDB() {
       key   TEXT PRIMARY KEY,
       value TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS routines (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      name       TEXT NOT NULL,
+      type       TEXT NOT NULL DEFAULT 'repeating',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS routine_days (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      routine_id   INTEGER NOT NULL,
+      day_index    INTEGER NOT NULL,
+      workout_id   INTEGER,
+      is_rest      INTEGER DEFAULT 0,
+      day_of_week  INTEGER,
+      FOREIGN KEY (routine_id) REFERENCES routines(id) ON DELETE CASCADE,
+      FOREIGN KEY (workout_id) REFERENCES workouts(id) ON DELETE SET NULL
+    );
   `);
 
   // Seed cardio types if table is empty
@@ -85,9 +103,10 @@ export function initDB() {
   }
 
   // Migration: add is_hidden to exercises if missing
-  try {
-    db.execSync('ALTER TABLE exercises ADD COLUMN is_hidden INTEGER DEFAULT 0');
-  } catch {}
+  try { db.execSync('ALTER TABLE exercises ADD COLUMN is_hidden INTEGER DEFAULT 0'); } catch {}
+  // Migration: add is_rest and day_of_week to routine_days if missing (for existing installs)
+  try { db.execSync('ALTER TABLE routine_days ADD COLUMN is_rest INTEGER DEFAULT 0'); } catch {}
+  try { db.execSync('ALTER TABLE routine_days ADD COLUMN day_of_week INTEGER'); } catch {}
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -99,6 +118,13 @@ export type Set         = { id: number; session_id: number; exercise_id: number;
 export type CardioType  = { id: number; name: string };
 export type CardioLog   = { id: number; session_id: number; cardio_type_id: number; duration_minutes: number; calories?: number; distance_km?: number; notes?: string };
 export type CardioLogFull = CardioLog & { cardio_type_name: string; date: string };
+
+export type RoutineType = 'repeating' | 'weekly';
+export type RoutineDay  = {
+  id: number; routine_id: number; day_index: number;
+  workout_id: number | null; is_rest: number; day_of_week: number | null;
+};
+export type Routine     = { id: number; name: string; type: RoutineType; created_at: string };
 
 // ─── Workouts ─────────────────────────────────────────────────────────────────
 
@@ -298,11 +324,23 @@ export function getSessionDetails(sessionId: number): { session: Session; sets: 
 export function getStreak(): number {
   const rows = db.getAllSync("SELECT DISTINCT date FROM sessions ORDER BY date DESC") as { date: string }[];
   if (!rows.length) return 0;
-  const today = new Date(); today.setHours(0,0,0,0);
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+
+  const mostRecentDate = new Date(rows[0].date + 'T00:00:00'); mostRecentDate.setHours(0, 0, 0, 0);
+
+  // Streak is broken only if the most recent session was 2+ days ago (i.e., a full day missed).
+  // Being at midnight with no session yet today does NOT break the streak — yesterday still counts.
+  const daysSinceLast = Math.round((today.getTime() - mostRecentDate.getTime()) / 86400000);
+  if (daysSinceLast > 1) return 0; // Full day missed → streak is 0
+
+  // Count back from the most recent logged day
+  const startFrom = mostRecentDate;
   let streak = 0;
   for (let i = 0; i < rows.length; i++) {
-    const d = new Date(rows[i].date); d.setHours(0,0,0,0);
-    const expected = new Date(today); expected.setDate(today.getDate() - i);
+    const d = new Date(rows[i].date + 'T00:00:00'); d.setHours(0, 0, 0, 0);
+    const expected = new Date(startFrom); expected.setDate(startFrom.getDate() - i);
     if (d.getTime() === expected.getTime()) streak++; else break;
   }
   return streak;
@@ -353,6 +391,38 @@ export function getHistoricalExerciseNames(workoutName: string): string[] {
   return rows.map(r => r.name);
 }
 
+/** All distinct exercise names ever logged, sorted alphabetically.
+ *  Used for cross-workout exercise progress (e.g. Seated Row across multiple workouts). */
+export function getAllExerciseNames(): string[] {
+  const rows = db.getAllSync(`
+    SELECT DISTINCT LOWER(e.name) as name_lower, e.name
+    FROM sets st
+    JOIN exercises e ON e.id = st.exercise_id
+    ORDER BY LOWER(e.name) ASC
+  `) as { name_lower: string; name: string }[];
+  // Deduplicate case-insensitively, prefer the capitalised version
+  const seen = new Map<string, string>();
+  rows.forEach(r => { if (!seen.has(r.name_lower)) seen.set(r.name_lower, r.name); });
+  return [...seen.values()];
+}
+
+/** Returns progress for an exercise by name, across ALL workouts (combines duplicates). */
+export function getExerciseProgressGlobal(exerciseName: string): ProgressPoint[] {
+  return db.getAllSync(`
+    SELECT s.date,
+           MAX(st.weight)                        as weight,
+           SUM(st.weight * st.reps)              as volume,
+           MAX(st.reps)                           as max_reps,
+           MAX(COALESCE(st.duration_seconds, 0)) as max_duration_seconds
+    FROM sets st
+    JOIN exercises e ON e.id = st.exercise_id
+    JOIN sessions  s ON s.id = st.session_id
+    WHERE LOWER(e.name) = LOWER(?)
+    GROUP BY s.date
+    ORDER BY s.date ASC
+  `, [exerciseName]) as ProgressPoint[];
+}
+
 export type CardioProgressPoint = {
   date: string;
   cardio_type_name: string;
@@ -378,7 +448,6 @@ export function getCardioProgress(): CardioProgressPoint[] {
     ORDER BY ct.name ASC, s.date ASC
   `) as CardioProgressPoint[];
 }
-
 // Also keep a by-id variant for internal use
 export function getExerciseProgressById(exerciseId: number): ProgressPoint[] {
   return db.getAllSync(`
@@ -390,18 +459,96 @@ export function getExerciseProgressById(exerciseId: number): ProgressPoint[] {
 }
 
 export function getTotalWorkouts(): number { return (db.getFirstSync('SELECT COUNT(*) as c FROM sessions') as any).c; }
+
+/** Returns the date of the very first session ever logged, or null. */
+export function getFirstSessionDate(): string | null {
+  try {
+    const row = db.getFirstSync('SELECT date FROM sessions ORDER BY date ASC LIMIT 1') as { date: string } | null;
+    return row?.date ?? null;
+  } catch { return null; }
+}
+
+/** Returns a milestone message if today marks an anniversary or session count milestone, else null.
+ *  Checks real calendar years from first session date, plus fixed session-count milestones. */
+export function checkMilestone(total: number): string | null {
+  // ── Session count milestones ──────────────────────────────────────────────
+  const countMilestones: Record<number, string> = {
+    1:    "First workout logged! The journey begins 🎉",
+    5:    "5 sessions done — off to a great start!",
+    10:   "10 sessions — double digits! 💪",
+    25:   "25 sessions — a habit is forming 🔥",
+    50:   "50 sessions! Halfway to a century 🏅",
+    75:   "75 sessions — three quarters to 100!",
+    100:  "100 sessions! A true century 🏆",
+    150:  "150 sessions — seriously committed 💎",
+    200:  "200 sessions — keep going! 💪",
+    250:  "250 sessions — elite consistency 🔥",
+    300:  "300 sessions! The 300 club 🛡️",
+    400:  "400 sessions — unstoppable force 🌊",
+    500:  "500 sessions! Half a thousand 🌟",
+    600:  "600 sessions — extraordinary dedication 🎯",
+    750:  "750 sessions — three quarters to a thousand!",
+    1000: "1000 sessions! One thousand workouts 🚀👑",
+    1250: "1250 sessions — absolutely legendary 🌟",
+    1500: "1500 sessions! Relentless 🏔️",
+    2000: "2000 sessions — beyond elite 🌍",
+    2500: "2500 sessions — you are the gym 🏛️",
+    5000: "5000 sessions — a lifetime of fitness 🌠",
+  };
+  const countMsg = countMilestones[total] ?? null;
+
+  // ── Calendar anniversary milestones ───────────────────────────────────────
+  let yearMsg: string | null = null;
+  const firstDate = getFirstSessionDate();
+  if (firstDate) {
+    const first = new Date(firstDate);
+    const today = new Date();
+    // Same month and day as first session?
+    if (
+      today.getMonth()   === first.getMonth() &&
+      today.getDate()    === first.getDate() &&
+      today.getFullYear() > first.getFullYear()
+    ) {
+      const years = today.getFullYear() - first.getFullYear();
+      const labels: Record<number, string> = {
+        1:  "1 year of training — happy anniversary! 🎂",
+        2:  "2 years of showing up 🎂🎂",
+        3:  "3 years strong 🎂🎂🎂",
+        4:  "4 years — incredible commitment 🎂🎂🎂🎂",
+        5:  "5 years of training! Half a decade 🎆",
+        6:  "6 years — elite dedication 🌟",
+        7:  "7 years of lifting — legendary 👑",
+        8:  "8 years strong 🦾",
+        9:  "9 years — almost a decade!",
+        10: "10 years of training! A full decade 🏆🌍",
+        15: "15 years — a way of life 🗿",
+        20: "20 years of training! Truly iconic 🌠",
+      };
+      yearMsg = labels[years] ?? (years > 0 ? `${years} year${years !== 1 ? 's' : ''} of training! 🎂` : null);
+    }
+  }
+
+  // Year anniversary takes priority if both fire on same day
+  return yearMsg ?? countMsg;
+}
 export function getTotalSets():     number { return (db.getFirstSync('SELECT COUNT(*) as c FROM sets') as any).c; }
 export function getTotalVolume():   number { return Math.round((db.getFirstSync('SELECT SUM(weight*reps) as t FROM sets') as any)?.t ?? 0); }
 
 export function getThisWeekSessions(): number {
   return (db.getFirstSync("SELECT COUNT(DISTINCT date) as c FROM sessions WHERE date >= date('now','-6 days')") as any)?.c ?? 0;
 }
-export function getPersonalBests(): { exercise_name: string; weight: number; reps: number }[] {
+export function getPersonalBests(): { exercise_name: string; weight: number; reps: number; max_reps: number; is_bw: number; max_duration: number }[] {
   return db.getAllSync(`
-    SELECT e.name as exercise_name, MAX(st.weight) as weight, st.reps
+    SELECT e.name                                as exercise_name,
+           MAX(st.weight)                        as weight,
+           st.reps,
+           MAX(st.reps)                          as max_reps,
+           MAX(COALESCE(st.duration_seconds, 0)) as max_duration,
+           CASE WHEN AVG(CASE WHEN st.weight = 0 THEN 1.0 ELSE 0.0 END) >= 0.5 THEN 1 ELSE 0 END as is_bw
     FROM sets st JOIN exercises e ON e.id = st.exercise_id
-    GROUP BY st.exercise_id ORDER BY weight DESC LIMIT 5
-  `) as { exercise_name: string; weight: number; reps: number }[];
+    GROUP BY LOWER(e.name)
+    ORDER BY weight DESC LIMIT 10
+  `) as { exercise_name: string; weight: number; reps: number; max_reps: number; is_bw: number; max_duration: number }[];
 }
 
 export function getLastSessionSummary(workoutId: number): { daysAgo: number; totalSets: number; totalVolume: number } | null {
@@ -411,6 +558,259 @@ export function getLastSessionSummary(workoutId: number): { daysAgo: number; tot
   const daysAgo = Math.round((today.getTime() - new Date(session.date + 'T00:00:00').getTime()) / 86400000);
   const sets = db.getAllSync('SELECT weight, reps FROM sets WHERE session_id = ?', [session.id]) as { weight: number; reps: number }[];
   return { daysAgo, totalSets: sets.length, totalVolume: sets.reduce((s, r) => s + r.weight * r.reps, 0) };
+}
+
+/** Returns true if any session was logged today (for notification suppression) */
+export function hasWorkoutToday(): boolean {
+  const today = new Date().toISOString().slice(0, 10);
+  const c = (db.getFirstSync("SELECT COUNT(*) as c FROM sessions WHERE date = ?", [today]) as any)?.c ?? 0;
+  return c > 0;
+}
+
+/** Per-exercise summary for the post-workout summary screen.
+ *  Returns each exercise name with current-session best vs previous-session best. */
+export type ExerciseSummaryRow = {
+  exercise_name: string;
+  cur_weight: number;
+  cur_reps: number;
+  cur_duration: number | null;
+  prev_weight: number | null;
+  prev_reps: number | null;
+  prev_duration: number | null;
+  is_bw: boolean;
+  is_duration: boolean;
+};
+export function getSessionExerciseSummary(sessionId: number): ExerciseSummaryRow[] {
+  // Current session exercises
+  const exercises = db.getAllSync(`
+    SELECT DISTINCT e.id, e.name
+    FROM sets st JOIN exercises e ON e.id = st.exercise_id
+    WHERE st.session_id = ?
+    ORDER BY e.sort_order
+  `, [sessionId]) as { id: number; name: string }[];
+
+  const session = db.getFirstSync('SELECT * FROM sessions WHERE id = ?', [sessionId]) as Session | null;
+  if (!session) return [];
+
+  return exercises.map(ex => {
+    // Current session bests
+    const cur = db.getFirstSync(`
+      SELECT MAX(weight) as weight, MAX(reps) as reps,
+             MAX(COALESCE(duration_seconds,0)) as duration
+      FROM sets WHERE session_id = ? AND exercise_id = ?
+    `, [sessionId, ex.id]) as any;
+
+    // Previous session (most recent session before this one that has this exercise)
+    const prev = db.getFirstSync(`
+      SELECT MAX(st.weight) as weight, MAX(st.reps) as reps,
+             MAX(COALESCE(st.duration_seconds,0)) as duration
+      FROM sets st
+      JOIN sessions s ON s.id = st.session_id
+      WHERE st.exercise_id = ? AND s.date < ?
+      ORDER BY s.date DESC LIMIT 1
+    `, [ex.id, session.date]) as any;
+
+    // Count total sets for this exercise across all history to determine BW
+    const allSets = db.getAllSync(`
+      SELECT weight, duration_seconds FROM sets WHERE exercise_id = ?
+    `, [ex.id]) as { weight: number; duration_seconds: number | null }[];
+
+    const bwCount  = allSets.filter(s => s.weight === 0).length;
+    const is_bw    = bwCount >= allSets.length / 2;
+    const is_duration = allSets.some(s => (s.duration_seconds ?? 0) > 0);
+
+    return {
+      exercise_name: ex.name,
+      cur_weight:    cur?.weight ?? 0,
+      cur_reps:      cur?.reps ?? 0,
+      cur_duration:  cur?.duration > 0 ? cur.duration : null,
+      prev_weight:   prev?.weight ?? null,
+      prev_reps:     prev?.reps ?? null,
+      prev_duration: prev?.duration > 0 ? prev.duration : null,
+      is_bw,
+      is_duration,
+    };
+  });
+}
+
+/** Cardio summary for post-workout summary screen */
+export type CardioSummaryRow = {
+  cardio_type_name: string;
+  cur_duration: number; cur_calories: number | null; cur_distance: number | null;
+  prev_duration: number | null; prev_calories: number | null;
+};
+export function getSessionCardioSummary(sessionId: number): CardioSummaryRow[] {
+  const session = db.getFirstSync('SELECT * FROM sessions WHERE id = ?', [sessionId]) as Session | null;
+  if (!session) return [];
+  const logs = db.getAllSync(`
+    SELECT cl.*, ct.name as cardio_type_name
+    FROM cardio_logs cl JOIN cardio_types ct ON ct.id = cl.cardio_type_id
+    WHERE cl.session_id = ?
+  `, [sessionId]) as (CardioLog & { cardio_type_name: string })[];
+
+  return logs.map(log => {
+    const prev = db.getFirstSync(`
+      SELECT cl.duration_minutes, cl.calories
+      FROM cardio_logs cl
+      JOIN sessions s ON s.id = cl.session_id
+      WHERE cl.cardio_type_id = ? AND s.date < ?
+      ORDER BY s.date DESC LIMIT 1
+    `, [log.cardio_type_id, session.date]) as any;
+
+    return {
+      cardio_type_name: log.cardio_type_name,
+      cur_duration:  log.duration_minutes,
+      cur_calories:  log.calories ?? null,
+      cur_distance:  log.distance_km ?? null,
+      prev_duration: prev?.duration_minutes ?? null,
+      prev_calories: prev?.calories ?? null,
+    };
+  });
+}
+
+/** Combine two consecutive sessions of the same workout_id.
+ *  Moves all sets/cardio_logs from session B into session A, then deletes B. */
+
+/** Returns the best single set value for an exercise (weight for weighted, reps for BW, seconds for duration). */
+export function getExerciseBest(exerciseName: string): { weight: number; reps: number; duration: number; is_bw: boolean; is_duration: boolean } | null {
+  const row = db.getFirstSync(`
+    SELECT MAX(st.weight) as weight, MAX(st.reps) as reps,
+           MAX(COALESCE(st.duration_seconds,0)) as duration,
+           AVG(CASE WHEN st.weight=0 THEN 1.0 ELSE 0.0 END) as bw_ratio
+    FROM sets st JOIN exercises e ON e.id=st.exercise_id
+    WHERE LOWER(e.name)=LOWER(?)
+  `, [exerciseName]) as any;
+  if (!row || row.reps == null) return null;
+  return { weight: row.weight ?? 0, reps: row.reps ?? 0, duration: row.duration ?? 0, is_bw: row.bw_ratio >= 0.5, is_duration: row.duration > 0 };
+}
+
+/** Total volume for a specific exercise across all history (weight × reps, or reps for BW, or duration seconds). */
+export function getExerciseTotalVolume(exerciseName: string): { volume: number; reps: number; duration: number; is_bw: boolean; is_duration: boolean } {
+  const row = db.getFirstSync(`
+    SELECT SUM(st.weight * st.reps) as volume, SUM(st.reps) as reps,
+           SUM(COALESCE(st.duration_seconds,0)) as duration,
+           AVG(CASE WHEN st.weight=0 THEN 1.0 ELSE 0.0 END) as bw_ratio
+    FROM sets st JOIN exercises e ON e.id=st.exercise_id
+    WHERE LOWER(e.name)=LOWER(?)
+  `, [exerciseName]) as any;
+  return { volume: row?.volume ?? 0, reps: row?.reps ?? 0, duration: row?.duration ?? 0, is_bw: (row?.bw_ratio ?? 0) >= 0.5, is_duration: (row?.duration ?? 0) > 0 };
+}
+
+/** Best total volume in a single session by workout name. */
+export function getBestWorkoutDayVolume(workoutName: string): { date: string; volume: number } | null {
+  const row = db.getFirstSync(`
+    SELECT s.date, SUM(st.weight * st.reps) as volume
+    FROM sets st
+    JOIN sessions  s ON s.id  = st.session_id
+    JOIN workouts  w ON w.id  = s.workout_id
+    WHERE LOWER(w.name) = LOWER(?)
+    GROUP BY s.id
+    ORDER BY volume DESC
+    LIMIT 1
+  `, [workoutName]) as any;
+  return row ? { date: row.date, volume: row.volume ?? 0 } : null;
+}
+
+/** Unique workout names for use in stat tile pickers. */
+export function getWorkoutNamesForStats(): string[] {
+  return (db.getAllSync(`SELECT DISTINCT name FROM workouts WHERE is_cardio=0 ORDER BY name ASC`) as { name: string }[]).map(r => r.name);
+}
+export function combineSessions(keepId: number, removeId: number): boolean {
+  const a = db.getFirstSync('SELECT * FROM sessions WHERE id = ?', [keepId]) as Session | null;
+  const b = db.getFirstSync('SELECT * FROM sessions WHERE id = ?', [removeId]) as Session | null;
+  if (!a || !b || a.workout_id !== b.workout_id) return false;
+  // Sum durations so combined session reflects total time
+  const durA = a.duration_seconds ?? 0;
+  const durB = b.duration_seconds ?? 0;
+  if (durA > 0 || durB > 0) {
+    db.runSync('UPDATE sessions SET duration_seconds = ? WHERE id = ?', [durA + durB, keepId]);
+  }
+  db.runSync('UPDATE sets        SET session_id = ? WHERE session_id = ?', [keepId, removeId]);
+  db.runSync('UPDATE cardio_logs SET session_id = ? WHERE session_id = ?', [keepId, removeId]);
+  db.runSync('DELETE FROM sessions WHERE id = ?', [removeId]);
+  return true;
+}
+
+// ─── Routines ─────────────────────────────────────────────────────────────────
+
+const ACTIVE_ROUTINE_KEY = 'active_routine';
+
+export function getRoutine(): Routine | null {
+  return db.getFirstSync('SELECT * FROM routines ORDER BY created_at DESC LIMIT 1') as Routine | null;
+}
+export function getRoutineDays(routineId: number): (RoutineDay & { workout_name?: string })[] {
+  return db.getAllSync(`
+    SELECT rd.*, w.name as workout_name
+    FROM routine_days rd
+    LEFT JOIN workouts w ON w.id = rd.workout_id
+    WHERE rd.routine_id = ?
+    ORDER BY rd.day_index ASC
+  `, [routineId]) as (RoutineDay & { workout_name?: string })[];
+}
+export function createRoutine(name: string, type: RoutineType, days: Omit<RoutineDay, 'id' | 'routine_id'>[]): number {
+  // Only one routine allowed — delete any existing one first
+  db.execSync('DELETE FROM routine_days; DELETE FROM routines;');
+  const id = db.runSync("INSERT INTO routines (name, type) VALUES (?, ?)", [name, type]).lastInsertRowId;
+  days.forEach((d, i) => {
+    db.runSync(
+      'INSERT INTO routine_days (routine_id, day_index, workout_id, is_rest, day_of_week) VALUES (?,?,?,?,?)',
+      [id, i, d.workout_id ?? null, d.is_rest ? 1 : 0, d.day_of_week ?? null]
+    );
+  });
+  return id;
+}
+export function deleteRoutine() {
+  db.execSync('DELETE FROM routine_days; DELETE FROM routines;');
+}
+export function updateRoutineProgress(dayIndex: number) {
+  AsyncStorage.setItem(ACTIVE_ROUTINE_KEY, String(dayIndex));
+}
+export async function getRoutineProgress(): Promise<number> {
+  try { const v = await AsyncStorage.getItem(ACTIVE_ROUTINE_KEY); return v ? parseInt(v) : 0; } catch { return 0; }
+}
+export async function clearRoutineProgress() {
+  await AsyncStorage.removeItem(ACTIVE_ROUTINE_KEY);
+}
+
+const ROUTINE_PAUSED_KEY = 'routine_paused';
+export async function pauseRoutine() {
+  await AsyncStorage.setItem(ROUTINE_PAUSED_KEY, 'true');
+}
+export async function resumeRoutine() {
+  await AsyncStorage.removeItem(ROUTINE_PAUSED_KEY);
+}
+export async function isRoutinePaused(): Promise<boolean> {
+  try { const v = await AsyncStorage.getItem(ROUTINE_PAUSED_KEY); return v === 'true'; } catch { return false; }
+}
+
+/** Returns the workout to do today given routine type.
+ *  For 'repeating': uses stored day index mod total days.
+ *  For 'weekly': finds the day matching today's day-of-week. */
+export async function getTodayRoutineWorkout(): Promise<{ workout: Workout | null; isRest: boolean; dayIndex: number; totalDays: number } | null> {
+  const routine = getRoutine();
+  if (!routine) return null;
+  const days = getRoutineDays(routine.id);
+  if (!days.length) return null;
+
+  let dayIndex = 0;
+  if (routine.type === 'repeating') {
+    dayIndex = await getRoutineProgress();
+    dayIndex = dayIndex % days.length;
+  } else {
+    // weekly — match by day of week
+    const dow = new Date().getDay();
+    const found = days.find(d => d.day_of_week === dow);
+    dayIndex = found ? found.day_index : -1;
+  }
+
+  if (dayIndex < 0 || dayIndex >= days.length) return null;
+  const day = days[dayIndex];
+  if (day.is_rest) return { workout: null, isRest: true, dayIndex, totalDays: days.length };
+
+  const workout = day.workout_id
+    ? (db.getFirstSync('SELECT * FROM workouts WHERE id = ?', [day.workout_id]) as Workout | null)
+    : null;
+  return { workout, isRest: false, dayIndex, totalDays: days.length };
 }
 
 // ─── Prefs ────────────────────────────────────────────────────────────────────
@@ -454,8 +854,15 @@ export async function getRecentSession(): Promise<RecentSession | null> {
     const raw = await AsyncStorage.getItem(LAST_SESSION_KEY);
     if (!raw) return null;
     const data: RecentSession = JSON.parse(raw);
-    if (Date.now() - new Date(data.finished_at).getTime() < 15 * 60 * 1000) return data;
-    return null;
+    // Valid for 15 minutes
+    if (Date.now() - new Date(data.finished_at).getTime() >= 15 * 60 * 1000) return null;
+    // Verify the session still exists in the DB — it may have been deleted from history
+    const exists = db.getFirstSync('SELECT id FROM sessions WHERE id = ?', [data.session_id]);
+    if (!exists) {
+      await AsyncStorage.removeItem(LAST_SESSION_KEY);
+      return null;
+    }
+    return data;
   } catch { return null; }
 }
 export async function clearLastSession() {
@@ -472,6 +879,8 @@ export function exportAllData() {
     sets:         db.getAllSync('SELECT * FROM sets'),
     cardio_types: db.getAllSync('SELECT * FROM cardio_types'),
     cardio_logs:  db.getAllSync('SELECT * FROM cardio_logs'),
+    routines:     db.getAllSync('SELECT * FROM routines'),
+    routine_days: db.getAllSync('SELECT * FROM routine_days'),
     exportedAt:   new Date().toISOString(),
   };
 }

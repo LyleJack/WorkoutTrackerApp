@@ -22,8 +22,14 @@
       "permissions": [
         "RECEIVE_BOOT_COMPLETED",
         "SCHEDULE_EXACT_ALARM",
-        "USE_EXACT_ALARM"
-      ]
+        "USE_EXACT_ALARM",
+        "VIBRATE",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "SYSTEM_ALERT_WINDOW",
+        "FOREGROUND_SERVICE_SPECIAL_USE"
+      ],
+      "softwareKeyboardLayoutMode": "adjustResize"
     },
     "plugins": [
       "expo-router",
@@ -35,11 +41,9 @@
           "color": "#6C63FF",
           "sounds": []
         }
-      ]
+      ],
+      "./plugins/withFloatingTimer"
     ],
-    "experiments": {
-      "typedRoutes": true
-    },
     "extra": {
       "router": {},
       "eas": {
