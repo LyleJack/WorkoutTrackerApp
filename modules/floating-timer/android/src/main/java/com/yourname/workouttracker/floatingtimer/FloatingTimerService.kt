@@ -8,7 +8,9 @@ import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.*
 import android.view.*
+import android.view.MotionEvent
 import android.view.animation.DecelerateInterpolator
+import com.yourname.workouttracker.R
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
@@ -151,7 +153,7 @@ class FloatingTimerService : Service() {
                     // If barely moved, treat as tap → open app
                     val dx = Math.abs(event.rawX - touchX)
                     val dy = Math.abs(event.rawY - touchY)
-                    if (dx < 8 && dy < 8) openApp()
+                    if (dx < 8f && dy < 8f) openApp()
                     // Snap to nearest vertical edge (left / right)
                     snapToEdge(view, params)
                     true
