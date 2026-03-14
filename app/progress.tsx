@@ -103,12 +103,23 @@ function ProgressScreenInner() {
   }
 
   function buildChartPoints(points: ProgressPoint[], isBW: boolean, isDuration: boolean, baseColor: string, mixedColor: string) {
+    // Compute cumulative totals for volume mode on BW and duration exercises
+    let cumReps     = 0;
+    let cumDuration = 0;
+
     return points.map(p => {
+      cumReps     += p.total_reps ?? 0;
+      cumDuration += p.total_duration_seconds ?? 0;
+
       const isWeighted = p.weight > 0;
       let yVal: number;
-      if (isDuration)      yVal = p.max_duration_seconds ?? 0;
-      else if (isBW)       yVal = p.max_reps ?? 1;
-      else                 yVal = viewMode === 'weight' ? p.weight : p.volume;
+      if (isDuration) {
+        yVal = viewMode === 'volume' ? cumDuration : (p.max_duration_seconds ?? 0);
+      } else if (isBW) {
+        yVal = viewMode === 'volume' ? cumReps : (p.max_reps ?? 1);
+      } else {
+        yVal = viewMode === 'weight' ? p.weight : p.volume;
+      }
       const dotColor = (isBW && isWeighted) ? mixedColor : baseColor;
       return {
         value: yVal,
@@ -117,12 +128,20 @@ function ProgressScreenInner() {
         onPress: () => {
           let label: string;
           if (isDuration) {
-            label = formatDuration(p.max_duration_seconds ?? 0);
-            if (isWeighted) label += ` + ${p.weight} kg`;
-          } else if (isBW && isWeighted) {
-            label = `${p.max_reps} reps + ${p.weight} kg`;
+            if (viewMode === 'volume') {
+              label = `${cumDuration}s total`;
+            } else {
+              label = formatDuration(p.max_duration_seconds ?? 0);
+              if (isWeighted) label += ` + ${p.weight} kg`;
+            }
           } else if (isBW) {
-            label = `${p.max_reps ?? '?'} reps`;
+            if (viewMode === 'volume') {
+              label = `${cumReps} reps total`;
+            } else if (isWeighted) {
+              label = `${p.max_reps} reps + ${p.weight} kg`;
+            } else {
+              label = `${p.max_reps ?? '?'} reps`;
+            }
           } else {
             label = viewMode === 'weight' ? `${p.weight} kg` : `${Math.round(p.volume)} vol`;
           }
@@ -221,10 +240,12 @@ function ProgressScreenInner() {
       const mixedColor = t.orange;
       const points     = buildChartPoints(rawPoints, isBW, isDuration, baseColor, mixedColor);
 
-      const peakReps   = isBW       ? Math.max(0, ...rawPoints.map(p => p.max_reps ?? 0)) : 0;
-      const peakDur    = isDuration ? Math.max(0, ...rawPoints.map(p => p.max_duration_seconds ?? 0)) : 0;
-      const peakWeight = !isBW && !isDuration ? Math.max(0, ...rawPoints.filter(p => p.weight > 0).map(p => p.weight)) : 0;
-      const peakVol    = !isBW && !isDuration ? Math.max(0, ...rawPoints.map(p => p.volume)) : 0;
+      const peakReps      = isBW       ? Math.max(0, ...rawPoints.map(p => p.max_reps ?? 0)) : 0;
+      const peakDur       = isDuration ? Math.max(0, ...rawPoints.map(p => p.max_duration_seconds ?? 0)) : 0;
+      const peakWeight    = !isBW && !isDuration ? Math.max(0, ...rawPoints.filter(p => p.weight > 0).map(p => p.weight)) : 0;
+      const peakVol       = !isBW && !isDuration ? Math.max(0, ...rawPoints.map(p => p.volume)) : 0;
+      const totalReps     = isBW       ? rawPoints.reduce((s, p) => s + (p.total_reps ?? 0), 0) : 0;
+      const totalDuration = isDuration ? rawPoints.reduce((s, p) => s + (p.total_duration_seconds ?? 0), 0) : 0;
 
       return (
         <View key={name} style={[styles.card, { backgroundColor: t.bgCard, borderColor: t.border }]}>
@@ -236,8 +257,16 @@ function ProgressScreenInner() {
                 <Text style={[styles.bwBadgeText, { color: t.purple }]}>{isDuration ? '⏱' : 'BW'}</Text>
               </View>
             )}
-            {isBW       && peakReps   > 0 && <Text style={[styles.cardPeak, { color: baseColor }]}>{peakReps} reps</Text>}
-            {isDuration && peakDur    > 0 && <Text style={[styles.cardPeak, { color: baseColor }]}>{formatDuration(peakDur)}</Text>}
+            {isBW       && (viewMode === 'volume' ? totalReps > 0 : peakReps > 0) && (
+              <Text style={[styles.cardPeak, { color: baseColor }]}>
+                {viewMode === 'volume' ? `${totalReps} reps total` : `${peakReps} reps`}
+              </Text>
+            )}
+            {isDuration && (viewMode === 'volume' ? totalDuration > 0 : peakDur > 0) && (
+              <Text style={[styles.cardPeak, { color: baseColor }]}>
+                {viewMode === 'volume' ? `${totalDuration}s total` : formatDuration(peakDur)}
+              </Text>
+            )}
             {!isBW && !isDuration && peakWeight > 0 && (
               <Text style={[styles.cardPeak, { color: baseColor }]}>
                 {viewMode === 'weight' ? `${peakWeight} kg` : `${Math.round(peakVol)} vol`}

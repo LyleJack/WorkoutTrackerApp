@@ -1,4 +1,5 @@
 import { useState, useEffect, useContext } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, Switch, Alert, Platform, TextInput,
@@ -40,6 +41,7 @@ function SettingsScreenInner() {
   const [streakSaved,     setStreakSaved]     = useState(false);
   const [showSummary,     setShowSummary]     = useState(true);
   const [themeMode,       setThemeMode]       = useState<ThemeMode>('dark');
+  const [defaultOverlay,  setDefaultOverlay]  = useState(false);
   const notifSupported = isNotificationsSupported();
 
   useEffect(() => {
@@ -53,6 +55,7 @@ function SettingsScreenInner() {
     getStreakOffset().then(v => setStreakOffsetTxt(String(v)));
     setShowSummary(getPref('show_summary') !== 'false');
     setThemeMode((getPref('theme_mode') ?? 'dark') as ThemeMode);
+    AsyncStorage.getItem('rest_timer_mode').then(m => setDefaultOverlay(m === 'overlay'));
   }, []);
 
   async function toggleNotifications(value: boolean) {
@@ -86,6 +89,11 @@ function SettingsScreenInner() {
   function toggleSummary(val: boolean) {
     setShowSummary(val);
     setPref('show_summary', val ? 'true' : 'false');
+  }
+
+  async function toggleDefaultOverlay(val: boolean) {
+    setDefaultOverlay(val);
+    await AsyncStorage.setItem('rest_timer_mode', val ? 'overlay' : 'in-app');
   }
 
   function setThemeModeVal(mode: ThemeMode) {
@@ -193,6 +201,13 @@ function SettingsScreenInner() {
             sub="Review personal bests and exercise comparison after finishing"
             value={showSummary}
             onValueChange={toggleSummary}
+            t={t}
+          />
+          <SwitchRow
+            title="Overlay rest timer by default"
+            sub="Show a floating bubble instead of the in-app timer when logging sets"
+            value={defaultOverlay}
+            onValueChange={toggleDefaultOverlay}
             t={t}
           />
         </Section>

@@ -5,6 +5,7 @@ import {
   Modal, FlatList, Vibration, Animated, PanResponder,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { DeviceEventEmitter } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -19,6 +20,7 @@ import {
 } from '@/src/db';
 import { ErrorBoundary } from '@/src/ErrorBoundary';
 import { FloatingTimer as NativeFloatingTimer } from '@/src/floatingTimer';
+import { useTheme } from '@/src/theme';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -34,6 +36,7 @@ const DURATION_OPTIONS: number[] = [
 const TIMER_PRESETS  = [60, 90, 120, 180, 240, 300];
 const VIBRATE_KEY        = 'rest_timer_vibrate';
 const TIMER_DURATION_KEY = 'rest_timer_duration';
+const TIMER_MODE_KEY     = 'rest_timer_mode'; // 'in-app' | 'overlay'
 const DURATION_MODE_KEY  = 'duration_mode_ex_';
 const SWIPE_THRESHOLD    = 56;
 const ARC_R              = 28;
@@ -278,42 +281,56 @@ function ElapsedTimer({ startTime, stopped }: { startTime: number; stopped?: boo
 // ─── Arc rest timer ───────────────────────────────────────────────────────────
 
 function ArcTimer({ remaining, total, color, size = 72, strokeWidth = 6 }: { remaining: number; total: number; color: string; size?: number; strokeWidth?: number }) {
-  const r    = (size / 2) - strokeWidth;
-  const circ = 2 * Math.PI * r;
-  const pct  = total > 0 ? remaining / total : 0;
-  const dash = pct * circ;
-  const cx   = size / 2;
+  const r     = (size / 2) - strokeWidth - 2;
+  const rInner = r - strokeWidth * 0.6;
+  const circ  = 2 * Math.PI * r;
+  const circI = 2 * Math.PI * rInner;
+  const pct   = total > 0 ? remaining / total : 0;
+  const dash  = pct * circ;
+  const dashI = pct * circI;
+  const cx    = size / 2;
+  // Color variants for the dual-ring effect
+  const colorDim = color + '28';
+  const colorMid = color + '55';
   return (
     <Svg width={size} height={size} style={{ transform: [{ rotate: '-90deg' }] }}>
-      <Circle cx={cx} cy={cx} r={r} stroke="#0f0f0f" strokeWidth={strokeWidth} fill="none" />
+      {/* Outer track */}
+      <Circle cx={cx} cy={cx} r={r} stroke={colorDim} strokeWidth={strokeWidth} fill="none" />
+      {/* Outer progress ring */}
       <Circle cx={cx} cy={cx} r={r} stroke={color} strokeWidth={strokeWidth} fill="none"
         strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" />
+      {/* Inner secondary ring — slightly delayed, thinner, mid-opacity */}
+      <Circle cx={cx} cy={cx} r={rInner} stroke={colorMid} strokeWidth={strokeWidth * 0.35} fill="none"
+        strokeDasharray={`${dashI} ${circI}`} strokeLinecap="round" />
     </Svg>
   );
 }
 
 // ─── Floating Rest Timer ──────────────────────────────────────────────────────
 
-function FloatingTimer({ timerKey, onDismiss }: { timerKey: number; onDismiss: () => void }) {
+function FloatingTimer({ timerKey, onDismiss, onModeChange }: { timerKey: number; onDismiss: () => void; onModeChange: (mode: 'in-app' | 'overlay') => void }) {
+  const t = useTheme();
   const [totalSeconds,   setTotalSeconds]   = useState(90);
   const [remaining,      setRemaining]      = useState(90);
   const [running,        setRunning]        = useState(true);
   const [vibrateEnabled, setVibrateEnabled] = useState(true);
-  const [expanded,       setExpanded]       = useState(false);
-  const [floatingModal,  setFloatingModal]  = useState(false);
+  const [timerMode,      setTimerMode]      = useState<'in-app' | 'overlay'>('in-app');
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startRef    = useRef(Date.now());
   const totalRef    = useRef(90);
 
   useEffect(() => {
-    Promise.all([AsyncStorage.getItem(VIBRATE_KEY), AsyncStorage.getItem(TIMER_DURATION_KEY)])
-      .then(([vib, dur]) => {
+    Promise.all([AsyncStorage.getItem(VIBRATE_KEY), AsyncStorage.getItem(TIMER_DURATION_KEY), AsyncStorage.getItem(TIMER_MODE_KEY)])
+      .then(([vib, dur, mode]) => {
         const vibrate  = vib !== 'false';
         const duration = dur ? parseInt(dur) : 90;
         setVibrateEnabled(vibrate);
         setTotalSeconds(duration);
         setRemaining(duration);
         totalRef.current = duration;
+        const resolvedMode = (mode as 'in-app' | 'overlay') || 'in-app';
+        setTimerMode(resolvedMode);
+        onModeChange(resolvedMode);
         setRunning(true);
         startRef.current = Date.now();
       });
@@ -386,12 +403,23 @@ function FloatingTimer({ timerKey, onDismiss }: { timerKey: number; onDismiss: (
     setTotalSeconds(secs); setRemaining(secs);
     setRunning(true); startRef.current = Date.now();
     await AsyncStorage.setItem(TIMER_DURATION_KEY, String(secs));
-    NativeFloatingTimer.update(secs);
+    if (timerMode === 'overlay') NativeFloatingTimer.update(secs);
   }
   async function toggleVibrate() {
     const next = !vibrateEnabled;
     setVibrateEnabled(next);
     await AsyncStorage.setItem(VIBRATE_KEY, next ? 'true' : 'false');
+  }
+  async function toggleTimerMode() {
+    const next: 'in-app' | 'overlay' = timerMode === 'in-app' ? 'overlay' : 'in-app';
+    setTimerMode(next);
+    onModeChange(next);
+    await AsyncStorage.setItem(TIMER_MODE_KEY, next);
+    if (next === 'overlay' && running && remaining > 0) {
+      NativeFloatingTimer.show(remaining, t.isDark);
+    } else if (next === 'in-app') {
+      NativeFloatingTimer.hide();
+    }
   }
   function handleArcTap() {
     if (remaining === 0) { setRemaining(totalSeconds); setRunning(true); startRef.current = Date.now(); }
@@ -399,30 +427,59 @@ function FloatingTimer({ timerKey, onDismiss }: { timerKey: number; onDismiss: (
   }
 
   const done     = remaining === 0;
-  const mins     = Math.floor(remaining / 60);
-  const secs     = remaining % 60;
-  const timeStr  = `${mins}:${String(secs).padStart(2, '0')}`;
-  const arcColor = done ? '#22c55e' : running ? '#6C63FF' : '#f59e0b';
+  const timeStr  = String(remaining);
+  const arcColor = done ? t.green : running ? t.purple : t.orange;
 
-  const timerContent = (
-    <>
-      {expanded && (
-        <View style={ft.panel}>
-          <View style={ft.presets}>
-            {TIMER_PRESETS.map(p => (
-              <TouchableOpacity key={p} style={[ft.preset, totalSeconds === p && ft.presetActive]} onPress={() => changePreset(p)}>
-                <Text style={[ft.presetText, totalSeconds === p && ft.presetTextActive]}>
-                  {p < 60 ? `${p}s` : `${p / 60}m`}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <TouchableOpacity style={ft.vibRow} onPress={toggleVibrate}>
-            <Ionicons name={vibrateEnabled ? 'phone-portrait-outline' : 'phone-portrait'} size={15} color={vibrateEnabled ? '#6C63FF' : '#444'} />
-            <Text style={[ft.vibText, !vibrateEnabled && ft.vibOff]}>Vibrate {vibrateEnabled ? 'on' : 'off'}</Text>
+  const sharedPanel = (
+    <View style={ft.panel}>
+      <View style={ft.presets}>
+        {TIMER_PRESETS.map(p => (
+          <TouchableOpacity key={p} style={[ft.preset, totalSeconds === p && ft.presetActive]} onPress={() => changePreset(p)}>
+            <Text style={[ft.presetText, totalSeconds === p && ft.presetTextActive]}>
+              {p < 60 ? `${p}s` : `${p / 60}m`}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <View style={ft.optionRow}>
+        <TouchableOpacity style={ft.vibRow} onPress={toggleVibrate}>
+          <Ionicons name={vibrateEnabled ? 'phone-portrait-outline' : 'phone-portrait'} size={15} color={vibrateEnabled ? t.purple : t.textMuted} />
+          <Text style={[ft.vibText, !vibrateEnabled && ft.vibOff]}>Vibrate</Text>
+        </TouchableOpacity>
+        {NativeFloatingTimer.isAvailable && (
+          <TouchableOpacity style={ft.vibRow} onPress={toggleTimerMode}>
+            <Ionicons name={timerMode === 'overlay' ? 'layers' : 'layers-outline'} size={15} color={timerMode === 'overlay' ? t.purple : t.textMuted} />
+            <Text style={[ft.vibText, timerMode === 'in-app' && ft.vibOff]}>
+              {timerMode === 'overlay' ? 'Overlay on' : 'Overlay'}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+
+  // In overlay mode: show settings panel + a status row, but no in-app arc timer
+  if (timerMode === 'overlay') {
+    return (
+      <View style={ft.wrapper}>
+        {sharedPanel}
+        <View style={ft.overlayStatusRow}>
+          <Ionicons name='layers' size={14} color={t.purple} />
+          <Text style={[ft.overlayStatusText, { color: t.textMuted }]}>
+            {done ? 'Rest complete' : running ? `Overlay timer running · ${timeStr}s` : 'Paused'}
+          </Text>
+          <TouchableOpacity style={ft.iconBtn} onPress={onDismiss}>
+            <Ionicons name='close' size={14} color={t.textMuted} />
           </TouchableOpacity>
         </View>
-      )}
+      </View>
+    );
+  }
+
+  return (
+    <View style={ft.wrapper}>
+      {sharedPanel}
+      {/* Timer row */}
       <View style={ft.row}>
         <TouchableOpacity style={ft.arcWrap} onPress={handleArcTap} activeOpacity={0.8}>
           <ArcTimer remaining={remaining} total={totalSeconds} color={arcColor} />
@@ -437,53 +494,11 @@ function FloatingTimer({ timerKey, onDismiss }: { timerKey: number; onDismiss: (
             <Text style={[ft.controlText, { color: arcColor }]}>{done ? 'Restart' : running ? 'Pause' : 'Resume'}</Text>
           </TouchableOpacity>
         </View>
-        <View style={ft.actions}>
-          <TouchableOpacity style={ft.iconBtn} onPress={() => setExpanded(e => !e)}>
-            <Ionicons name={expanded ? 'chevron-up' : 'options-outline'} size={15} color="#444" />
-          </TouchableOpacity>
-          {/* Pop-out / pin button — shows timer as overlay above everything */}
-          <TouchableOpacity style={ft.iconBtn} onPress={() => setFloatingModal(true)}>
-            <Ionicons name="expand-outline" size={15} color="#444" />
-          </TouchableOpacity>
-          <TouchableOpacity style={ft.iconBtn} onPress={onDismiss}>
-            <Ionicons name="close" size={15} color="#333" />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity style={ft.iconBtn} onPress={onDismiss}>
+          <Ionicons name='close' size={15} color={t.textMuted} />
+        </TouchableOpacity>
       </View>
-    </>
-  );
-
-  return (
-    <>
-      <View style={ft.wrapper}>{timerContent}</View>
-
-      {/* Pop-out floating modal — stays visible when scrolling */}
-      <Modal visible={floatingModal} transparent animationType="fade" statusBarTranslucent>
-        <View style={ft.floatOverlay}>
-          <TouchableOpacity style={ft.floatBackdrop} activeOpacity={1} onPress={() => setFloatingModal(false)} />
-          <View style={ft.floatBox}>
-            <View style={ft.floatArcWrap}>
-              <ArcTimer remaining={remaining} total={totalSeconds} color={arcColor} size={100} strokeWidth={8} />
-              <View style={ft.floatArcOverlay}>
-                <Text style={[ft.floatTime, { color: arcColor }]}>{done ? '✓' : timeStr}</Text>
-              </View>
-            </View>
-            <Text style={[ft.floatStatus, { color: arcColor }]}>
-              {done ? '✅ Rest complete!' : running ? 'Resting…' : 'Paused'}
-            </Text>
-            <TouchableOpacity style={[ft.floatBtn, { borderColor: arcColor + '66' }]} onPress={handleArcTap}>
-              <Ionicons name={done ? 'refresh' : running ? 'pause' : 'play'} size={18} color={arcColor} />
-              <Text style={[ft.floatBtnText, { color: arcColor }]}>
-                {done ? 'Restart' : running ? 'Pause' : 'Resume'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={ft.floatClose} onPress={() => setFloatingModal(false)}>
-              <Text style={ft.floatCloseText}>Back to workout</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    </>
+    </View>
   );
 }
 
@@ -554,6 +569,7 @@ export default function LogScreen() {
 function LogScreenInner() {
   const { sessionId, workoutId } = useLocalSearchParams<{ sessionId: string; workoutId: string }>();
   const router = useRouter();
+  const t = useTheme();
 
   const [data,          setData]          = useState<ExerciseSets[]>([]);
   const [drafts,        setDrafts]        = useState<Record<number, Draft>>({});
@@ -563,8 +579,9 @@ function LogScreenInner() {
   const [flashId,       setFlashId]       = useState<number | null>(null);
   const [checkedSets,   setCheckedSets]   = useState<Record<number, boolean>>({});
   const [finished,      setFinished]      = useState(false);
-  const finishedRef = useRef(false);
-  const startTime   = useRef(Date.now());
+  const finishedRef  = useRef(false);
+  const startTime    = useRef(Date.now());
+  const timerModeRef = useRef<'in-app' | 'overlay'>('in-app');
 
   const [dragging,    setDragging]    = useState<number | null>(null); // exercise id
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -645,7 +662,25 @@ function LogScreenInner() {
 
   useFocusEffect(useCallback(() => {
     load();
+
+    // If overlay mode is active, ping the service to check if it's still running.
+    // This restores timerVisible after navigating away and back.
+    let pongSub: ReturnType<typeof DeviceEventEmitter.addListener> | null = null;
+    if (timerModeRef.current === 'overlay') {
+      pongSub = DeviceEventEmitter.addListener('FloatingTimerPong', (data: { remaining: number; running: boolean }) => {
+        if (data.running && data.remaining > 0) {
+          setTimerVisible(true);
+        }
+        pongSub?.remove();
+        pongSub = null;
+      });
+      NativeFloatingTimer.ping();
+      // Clean up listener after 2s if no response
+      setTimeout(() => { pongSub?.remove(); pongSub = null; }, 2000);
+    }
+
     return () => {
+      pongSub?.remove();
       if (!finishedRef.current) {
         const workouts = getWorkouts();
         const w = workouts.find(w => w.id === Number(workoutId));
@@ -702,9 +737,13 @@ function LogScreenInner() {
     setTimeout(() => setFlashId(null), 600);
     setTimerKey(k => k + 1);
     setTimerVisible(true);
-    AsyncStorage.getItem(TIMER_DURATION_KEY).then(dur => {
+    AsyncStorage.multiGet([TIMER_DURATION_KEY, TIMER_MODE_KEY]).then(([[, dur], [, mode]]) => {
+      const resolvedMode = (mode as 'in-app' | 'overlay') || 'in-app';
+      timerModeRef.current = resolvedMode;
       const secs = dur ? parseInt(dur) : 90;
-      NativeFloatingTimer.show(secs);
+      if (resolvedMode === 'overlay') {
+        NativeFloatingTimer.show(secs, t.isDark);
+      }
     });
   }
 
@@ -866,7 +905,7 @@ function LogScreenInner() {
 
       {/* ── Rest timer ── */}
       {timerVisible && (
-        <FloatingTimer timerKey={timerKey} onDismiss={() => { setTimerVisible(false); NativeFloatingTimer.hide(); }} />
+        <FloatingTimer timerKey={timerKey} onDismiss={() => { setTimerVisible(false); NativeFloatingTimer.hide(); }} onModeChange={(m) => { timerModeRef.current = m; }} />
       )}
 
       {/* ── Exercise cards ── */}
@@ -1147,31 +1186,21 @@ const ft = StyleSheet.create({
   presetActive: { backgroundColor: '#6C63FF', borderColor: '#6C63FF' },
   presetText:   { color: '#444', fontSize: 13, fontWeight: '600' },
   presetTextActive: { color: '#fff' },
-  vibRow:  { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  vibText: { color: '#6C63FF', fontSize: 13, fontWeight: '600' },
+  optionRow: { flexDirection: 'row', gap: 20 },
+  vibRow:  { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  vibText: { color: '#6C63FF', fontSize: 12, fontWeight: '600' },
   vibOff:  { color: '#444' },
   row:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, gap: 16 },
   arcWrap: { width: 72, height: 72, position: 'relative', alignItems: 'center', justifyContent: 'center' },
   arcOverlay: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
-  arcTime:    { fontSize: 12, fontWeight: '800', letterSpacing: -0.5, fontVariant: ['tabular-nums'] },
+  arcTime:    { fontSize: 10, fontWeight: '800', letterSpacing: -0.5, fontVariant: ['tabular-nums'] },
   info:       { flex: 1, gap: 8 },
   status:     { fontSize: 13, fontWeight: '700' },
   controlBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#0d0d16', borderWidth: 1, alignSelf: 'flex-start' },
   controlText:{ fontSize: 12, fontWeight: '600' },
-  actions:    { gap: 8 },
   iconBtn:    { width: 32, height: 32, borderRadius: 16, backgroundColor: '#0d0d16', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#111' },
-  // Pop-out floating modal
-  floatOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', alignItems: 'center', justifyContent: 'center' },
-  floatBackdrop:{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  floatBox:     { backgroundColor: '#09090f', borderRadius: 28, padding: 32, alignItems: 'center', gap: 20, borderWidth: 1, borderColor: '#1a1a2a', minWidth: 260 },
-  floatArcWrap: { width: 120, height: 120, alignItems: 'center', justifyContent: 'center' },
-  floatArcOverlay: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
-  floatTime:    { fontSize: 28, fontWeight: '900', fontVariant: ['tabular-nums'] },
-  floatStatus:  { fontSize: 16, fontWeight: '700' },
-  floatBtn:     { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 20, borderWidth: 1 },
-  floatBtnText: { fontSize: 15, fontWeight: '700' },
-  floatClose:   { paddingVertical: 8 },
-  floatCloseText: { color: '#444', fontSize: 14 },
+  overlayStatusRow:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
+  overlayStatusText: { flex: 1, fontSize: 12, fontWeight: '600' },
 });
 
 const pk = StyleSheet.create({

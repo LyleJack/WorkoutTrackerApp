@@ -47,7 +47,7 @@ export default function RootLayout() {
   const deviceScheme                    = useColorScheme(); // 'light' | 'dark' | null
   const [themeMode, setThemeMode]       = useState<ThemeMode>('dark');
   const [palette,   setPalette]         = useState<ThemePalette>(darkPalette);
-  const [fontsLoaded, setFontsLoaded]   = useState(false);
+  const [fontsLoaded, setFontsLoaded]   = useState(true); // optimistic — font loads fast, avoid blank flash
 
   // Resolve palette from mode + device scheme
   function resolvePalette(mode: ThemeMode, scheme: typeof deviceScheme): ThemePalette {
@@ -111,12 +111,12 @@ export default function RootLayout() {
                 headerShown: false,
               }}
             >
-              <Tabs.Screen name="index"    options={{ title: 'Workouts', tabBarIcon: ({ color, size }) => fontsLoaded ? <Ionicons name="barbell-outline"     size={size} color={color} /> : <View style={{ width: size, height: size }} /> }} />
-              <Tabs.Screen name="history"  options={{ title: 'History',  tabBarIcon: ({ color, size }) => fontsLoaded ? <Ionicons name="time-outline"        size={size} color={color} /> : <View style={{ width: size, height: size }} /> }} />
-              <Tabs.Screen name="routine"  options={{ title: 'Routine',  tabBarIcon: ({ color, size }) => fontsLoaded ? <Ionicons name="calendar-outline"    size={size} color={color} /> : <View style={{ width: size, height: size }} /> }} />
-              <Tabs.Screen name="stats"    options={{ title: 'Stats',    tabBarIcon: ({ color, size }) => fontsLoaded ? <Ionicons name="stats-chart-outline" size={size} color={color} /> : <View style={{ width: size, height: size }} /> }} />
-              <Tabs.Screen name="progress" options={{ title: 'Progress', tabBarIcon: ({ color, size }) => fontsLoaded ? <Ionicons name="trending-up-outline" size={size} color={color} /> : <View style={{ width: size, height: size }} /> }} />
-              <Tabs.Screen name="settings" options={{ title: 'Settings', tabBarIcon: ({ color, size }) => fontsLoaded ? <Ionicons name="settings-outline"    size={size} color={color} /> : <View style={{ width: size, height: size }} /> }} />
+              <Tabs.Screen name="index"    options={{ title: 'Workouts', tabBarIcon: ({ color, size }) => <Ionicons name="barbell-outline"     size={size} color={color} /> }} />
+              <Tabs.Screen name="history"  options={{ title: 'History',  tabBarIcon: ({ color, size }) => <Ionicons name="time-outline"        size={size} color={color} /> }} />
+              <Tabs.Screen name="routine"  options={{ title: 'Routine',  tabBarIcon: ({ color, size }) => <Ionicons name="calendar-outline"    size={size} color={color} /> }} />
+              <Tabs.Screen name="stats"    options={{ title: 'Stats',    tabBarIcon: ({ color, size }) => <Ionicons name="stats-chart-outline" size={size} color={color} /> }} />
+              <Tabs.Screen name="progress" options={{ title: 'Progress', tabBarIcon: ({ color, size }) => <Ionicons name="trending-up-outline" size={size} color={color} /> }} />
+              <Tabs.Screen name="settings" options={{ title: 'Settings', tabBarIcon: ({ color, size }) => <Ionicons name="settings-outline"    size={size} color={color} /> }} />
               <Tabs.Screen name="workout/[id]"                options={{ href: null, headerShown: false }} />
               <Tabs.Screen name="workout/log/[sessionId]"     options={{ href: null, headerShown: false }} />
               <Tabs.Screen name="workout/cardio/[sessionId]"  options={{ href: null, headerShown: false }} />

@@ -357,7 +357,7 @@ export function getMostPopularWorkouts(period: 'month' | 'year'): WorkoutCount[]
   `) as WorkoutCount[];
 }
 
-export type ProgressPoint = { date: string; weight: number; volume: number; max_reps: number; max_duration_seconds: number | null };
+export type ProgressPoint = { date: string; weight: number; volume: number; max_reps: number; max_duration_seconds: number | null; total_reps: number; total_duration_seconds: number };
 
 // Returns progress for all exercises matching this name (across all workouts)
 export function getExerciseProgress(exerciseName: string): ProgressPoint[] {
@@ -366,7 +366,9 @@ export function getExerciseProgress(exerciseName: string): ProgressPoint[] {
            MAX(st.weight)                                    as weight,
            SUM(st.weight * st.reps)                         as volume,
            MAX(st.reps)                                      as max_reps,
-           MAX(COALESCE(st.duration_seconds, 0))             as max_duration_seconds
+           MAX(COALESCE(st.duration_seconds, 0))             as max_duration_seconds,
+           SUM(st.reps)                                      as total_reps,
+           SUM(COALESCE(st.duration_seconds, 0))             as total_duration_seconds
     FROM sets st
     JOIN exercises e ON e.id = st.exercise_id
     JOIN sessions  s ON s.id = st.session_id
@@ -413,7 +415,9 @@ export function getExerciseProgressGlobal(exerciseName: string): ProgressPoint[]
            MAX(st.weight)                        as weight,
            SUM(st.weight * st.reps)              as volume,
            MAX(st.reps)                           as max_reps,
-           MAX(COALESCE(st.duration_seconds, 0)) as max_duration_seconds
+           MAX(COALESCE(st.duration_seconds, 0)) as max_duration_seconds,
+           SUM(st.reps)                           as total_reps,
+           SUM(COALESCE(st.duration_seconds, 0)) as total_duration_seconds
     FROM sets st
     JOIN exercises e ON e.id = st.exercise_id
     JOIN sessions  s ON s.id = st.session_id
