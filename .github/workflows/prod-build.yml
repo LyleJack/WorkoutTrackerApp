@@ -15,8 +15,9 @@ jobs:
           node-version: '20'
       - run: npm install --legacy-peer-deps
       - run: npx expo prebuild --platform android --clean
-      - run: cd android && ./gradlew assembleDebug
+      - run: cd android && ./gradlew assembleRelease
       - uses: actions/upload-artifact@v4
         with:
-          name: Dev-Workout-Tracker-APK
-          path: android/app/build/outputs/apk/debug/workout-debug.apk
+          name: Workout-Tracker-Release-APK
+          path: android/app/build/outputs/apk/release/release-workout.apk
+
