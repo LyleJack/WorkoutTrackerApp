@@ -98,8 +98,6 @@ function withFloatingTimerPackage(config) {
 /**
  * Patch gradle-wrapper.properties to use Gradle 8.7 — the version compatible
  * with Expo SDK 55 / RN 0.83 when building locally with Java 21.
- * Also sets org.gradle.java.home in gradle.properties so Gradle always finds
- * the right JDK instead of falling back to the broken openjdk-21 symlink.
  */
 function withGradleVersion(config) {
   return withDangerousMod(config, [
@@ -119,20 +117,6 @@ function withGradleVersion(config) {
         );
         fs.writeFileSync(wrapperPath, wrapper);
         console.log('[withFloatingTimer] ✓ Pinned Gradle wrapper to 8.7');
-      }
-
-      // 2. Set JAVA_HOME in gradle.properties so Gradle never picks the wrong JVM
-      const gradlePropsPath = path.join(projectRoot, 'android', 'gradle.properties');
-      if (fs.existsSync(gradlePropsPath)) {
-        let props = fs.readFileSync(gradlePropsPath, 'utf8');
-        const javaHomeLine = 'org.gradle.java.home=/usr/lib/jvm/java-21-openjdk-amd64';
-        if (!props.includes('org.gradle.java.home')) {
-          props += '\n' + javaHomeLine + '\n';
-        } else {
-          props = props.replace(/org\.gradle\.java\.home=.*/, javaHomeLine);
-        }
-        fs.writeFileSync(gradlePropsPath, props);
-        console.log('[withFloatingTimer] ✓ Set org.gradle.java.home in gradle.properties');
       }
 
       return cfg;
