@@ -24,10 +24,7 @@
         "SCHEDULE_EXACT_ALARM",
         "USE_EXACT_ALARM",
         "VIBRATE",
-        "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-        "SYSTEM_ALERT_WINDOW",
-        "FOREGROUND_SERVICE_SPECIAL_USE"
+        "SYSTEM_ALERT_WINDOW"
       ],
       "softwareKeyboardLayoutMode": "adjustResize"
     },
@@ -43,12 +40,6 @@
         }
       ],
       "./plugins/withFloatingTimer"
-    ],
-    "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "ed3c1a03-6ee3-41fa-a7db-6bcd107ea606"
-      }
-    }
+    ]
   }
 }

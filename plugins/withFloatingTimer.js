@@ -44,13 +44,8 @@ function withFloatingTimerManifest(config) {
     const app = cfg.modResults.manifest;
 
     if (!app['uses-permission']) app['uses-permission'] = [];
-    for (const perm of [
-      'android.permission.SYSTEM_ALERT_WINDOW',
-      'android.permission.FOREGROUND_SERVICE',
-    ]) {
-      if (!app['uses-permission'].some(p => p.$?.['android:name'] === perm)) {
-        app['uses-permission'].push({ $: { 'android:name': perm } });
-      }
+    if (!app['uses-permission'].some(p => p.$?.['android:name'] === 'android.permission.SYSTEM_ALERT_WINDOW')) {
+      app['uses-permission'].push({ $: { 'android:name': 'android.permission.SYSTEM_ALERT_WINDOW' } });
     }
 
     const application = app.application[0];
@@ -59,10 +54,9 @@ function withFloatingTimerManifest(config) {
     if (!application.service.some(s => s.$?.['android:name'] === serviceName)) {
       application.service.push({
         $: {
-          'android:name':                  serviceName,
-          'android:enabled':               'true',
-          'android:exported':              'false',
-          'android:foregroundServiceType': 'mediaPlayback',
+          'android:name':     serviceName,
+          'android:enabled':  'true',
+          'android:exported': 'false',
         },
       });
     }
@@ -101,9 +95,55 @@ function withFloatingTimerPackage(config) {
   });
 }
 
+/**
+ * Patch gradle-wrapper.properties to use Gradle 8.7 — the version compatible
+ * with Expo SDK 55 / RN 0.83 when building locally with Java 21.
+ * Also sets org.gradle.java.home in gradle.properties so Gradle always finds
+ * the right JDK instead of falling back to the broken openjdk-21 symlink.
+ */
+function withGradleVersion(config) {
+  return withDangerousMod(config, [
+    'android',
+    async (cfg) => {
+      const projectRoot = cfg.modRequest.projectRoot;
+
+      // 1. Pin Gradle wrapper to 8.7
+      const wrapperPath = path.join(
+        projectRoot, 'android', 'gradle', 'wrapper', 'gradle-wrapper.properties'
+      );
+      if (fs.existsSync(wrapperPath)) {
+        let wrapper = fs.readFileSync(wrapperPath, 'utf8');
+        wrapper = wrapper.replace(
+          /distributionUrl=.*gradle-.*-bin\.zip/,
+          'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.5-bin.zip'
+        );
+        fs.writeFileSync(wrapperPath, wrapper);
+        console.log('[withFloatingTimer] ✓ Pinned Gradle wrapper to 8.7');
+      }
+
+      // 2. Set JAVA_HOME in gradle.properties so Gradle never picks the wrong JVM
+      const gradlePropsPath = path.join(projectRoot, 'android', 'gradle.properties');
+      if (fs.existsSync(gradlePropsPath)) {
+        let props = fs.readFileSync(gradlePropsPath, 'utf8');
+        const javaHomeLine = 'org.gradle.java.home=/usr/lib/jvm/java-21-openjdk-amd64';
+        if (!props.includes('org.gradle.java.home')) {
+          props += '\n' + javaHomeLine + '\n';
+        } else {
+          props = props.replace(/org\.gradle\.java\.home=.*/, javaHomeLine);
+        }
+        fs.writeFileSync(gradlePropsPath, props);
+        console.log('[withFloatingTimer] ✓ Set org.gradle.java.home in gradle.properties');
+      }
+
+      return cfg;
+    },
+  ]);
+}
+
 module.exports = function withFloatingTimer(config) {
   config = withFloatingTimerFiles(config);
   config = withFloatingTimerManifest(config);
   config = withFloatingTimerPackage(config);
+  config = withGradleVersion(config);
   return config;
 };

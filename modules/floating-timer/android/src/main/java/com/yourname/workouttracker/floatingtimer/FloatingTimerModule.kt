@@ -100,9 +100,6 @@ class FloatingTimerModule(private val reactContext: ReactApplicationContext)
         Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(reactContext)
 
     private fun startService(intent: Intent) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-            reactContext.startForegroundService(intent)
-        else
-            reactContext.startService(intent)
+        reactContext.startService(intent)
     }
 }
