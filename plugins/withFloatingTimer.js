@@ -95,39 +95,10 @@ function withFloatingTimerPackage(config) {
   });
 }
 
-/**
- * Patch gradle-wrapper.properties to use Gradle 8.7 — the version compatible
- * with Expo SDK 55 / RN 0.83 when building locally with Java 21.
- */
-function withGradleVersion(config) {
-  return withDangerousMod(config, [
-    'android',
-    async (cfg) => {
-      const projectRoot = cfg.modRequest.projectRoot;
-
-      // 1. Pin Gradle wrapper to 8.7
-      const wrapperPath = path.join(
-        projectRoot, 'android', 'gradle', 'wrapper', 'gradle-wrapper.properties'
-      );
-      if (fs.existsSync(wrapperPath)) {
-        let wrapper = fs.readFileSync(wrapperPath, 'utf8');
-        wrapper = wrapper.replace(
-          /distributionUrl=.*gradle-.*-bin\.zip/,
-          'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.5-bin.zip'
-        );
-        fs.writeFileSync(wrapperPath, wrapper);
-        console.log('[withFloatingTimer] ✓ Pinned Gradle wrapper to 8.7');
-      }
-
-      return cfg;
-    },
-  ]);
-}
 
 module.exports = function withFloatingTimer(config) {
   config = withFloatingTimerFiles(config);
   config = withFloatingTimerManifest(config);
   config = withFloatingTimerPackage(config);
-  config = withGradleVersion(config);
   return config;
 };
