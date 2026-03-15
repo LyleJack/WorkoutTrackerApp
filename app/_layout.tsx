@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Platform, StatusBar, useColorScheme } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Font from 'expo-font';
+import { useFonts } from 'expo-font';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { initDB, getPref, setPref } from '@/src/db';
 import { ErrorBoundary } from '@/src/ErrorBoundary';
@@ -47,7 +47,7 @@ export default function RootLayout() {
   const deviceScheme                    = useColorScheme(); // 'light' | 'dark' | null
   const [themeMode, setThemeMode]       = useState<ThemeMode>('dark');
   const [palette,   setPalette]         = useState<ThemePalette>(darkPalette);
-  const [fontsLoaded, setFontsLoaded]   = useState(true); // optimistic — font loads fast, avoid blank flash
+  const [fontsLoaded] = useFonts({ ...Ionicons.font });
 
   // Resolve palette from mode + device scheme
   function resolvePalette(mode: ThemeMode, scheme: typeof deviceScheme): ThemePalette {
@@ -79,13 +79,12 @@ export default function RootLayout() {
       console.error('[DB] init failed:', e);
     }
 
-    // Fonts load in background — UI renders without waiting
-    Font.loadAsync({ ...Ionicons.font })
-      .then(() => setFontsLoaded(true))
-      .catch(() => setFontsLoaded(true));
+
   }, []);
 
   const t = palette;
+
+  if (!fontsLoaded) return null;
 
   return (
     <SafeAreaProvider>
