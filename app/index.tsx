@@ -1,22 +1,44 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
-import {
-  View, Text, TouchableOpacity, TextInput,
-  StyleSheet, ScrollView, Dimensions, Modal, KeyboardAvoidingView, Platform,
-  Animated, AppState, AppStateStatus,
-} from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import {
-  getWorkouts, addWorkout, createSession, addExercise,
-  getRecentSession, clearLastSession, getLastSessionSummary,
-  getRoutine, getRoutineDays, getTodayRoutineWorkout, updateRoutineProgress,
-  deleteRoutine, clearRoutineProgress, hasWorkoutToday, getTotalWorkouts,
-  checkMilestone, getFirstSessionDate, pauseRoutine, resumeRoutine, isRoutinePaused,
-  Workout, Routine,
-} from '@/src/db';
-import { WorkoutIcon, getWorkoutIcon } from '@/src/WorkoutIcons';
 import { AppHeader } from '@/app/_layout';
-import { useTheme, FONT } from '@/src/theme';
+import {
+  addExercise,
+  addWorkout,
+  checkMilestone,
+  clearLastSession,
+  clearRoutineProgress,
+  createSession,
+  deleteRoutine,
+  getFirstSessionDate,
+  getLastSessionSummary,
+  getRecentSession,
+  getRoutine,
+  getTodayRoutineWorkout,
+  getTotalWorkouts,
+  getWorkouts,
+  hasWorkoutToday,
+  isRoutinePaused,
+  pauseRoutine, resumeRoutine,
+  Routine,
+  updateRoutineProgress,
+  Workout
+} from '@/src/db';
+import { FONT, useTheme } from '@/src/theme';
+import { getWorkoutIcon, WorkoutIcon } from '@/src/WorkoutIcons';
+import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Animated, AppState, AppStateStatus,
+  Dimensions,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
 const SCREEN_W = Dimensions.get('window').width;
 const CARD_GAP  = 12;
@@ -330,7 +352,7 @@ export default function HomeScreen() {
   if (mode === 'grid' && hasRoutine && todayInfo) {
     return (
       <View style={[styles.container, { backgroundColor: t.bg }]}>
-        <AppHeader title="Workouts" theme={t} />
+        <AppHeader title="Workouts" />
         {milestoneMsg && <MilestoneBanner message={milestoneMsg} onHide={() => setMilestoneMsg(null)} />}
 
         {/* "Different workout" gate */}
@@ -504,7 +526,7 @@ export default function HomeScreen() {
   // ── GRID MODE (no routine) ──────────────────────────────────────────────────
   if (mode === 'grid') return (
     <View style={[styles.container, { backgroundColor: t.bg }]}>
-      <AppHeader title="Workouts" theme={t} />
+      <AppHeader title="Workouts" />
       {milestoneMsg && <MilestoneBanner message={milestoneMsg} onHide={() => setMilestoneMsg(null)} />}
 
       {/* Resume / new session modal */}
