@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Floating timer bubble layout.
+  A single circle with a countdown text in the centre.
+  Size matches a standard chat-head bubble (~56dp).
+  The ripple drawable handles the press feedback.
+-->
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/bubble_root"
+    android:layout_width="56dp"
+    android:layout_height="56dp"
+    android:elevation="8dp">
+
+    <!-- Coloured circle background -->
+    <View
+        android:id="@+id/bubble_bg"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:background="@drawable/bubble_circle" />
+
+    <!-- Countdown text, e.g. "45" or "1:30" -->
+    <TextView
+        android:id="@+id/bubble_text"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:textColor="#FFFFFF"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:fontFamily="sans-serif-medium"
+        android:text="—" />
+
+</FrameLayout>
