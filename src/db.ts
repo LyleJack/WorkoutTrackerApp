@@ -21,6 +21,7 @@ export function initDB() {
       workout_id INTEGER NOT NULL,
       name       TEXT    NOT NULL,
       sort_order INTEGER DEFAULT 0,
+      notes      TEXT,
       FOREIGN KEY (workout_id) REFERENCES workouts(id) ON DELETE CASCADE
     );
 
@@ -104,6 +105,9 @@ export function initDB() {
 
   // Migration: add is_hidden to exercises if missing
   try { db.execSync('ALTER TABLE exercises ADD COLUMN is_hidden INTEGER DEFAULT 0'); } catch {}
+  // Migration: add is_pinned to workouts and notes to exercises
+  try { db.execSync('ALTER TABLE workouts  ADD COLUMN is_pinned INTEGER DEFAULT 0'); } catch {}
+  try { db.execSync('ALTER TABLE exercises ADD COLUMN notes TEXT'); } catch {}
   // Migration: add is_rest and day_of_week to routine_days if missing (for existing installs)
   try { db.execSync('ALTER TABLE routine_days ADD COLUMN is_rest INTEGER DEFAULT 0'); } catch {}
   try { db.execSync('ALTER TABLE routine_days ADD COLUMN day_of_week INTEGER'); } catch {}
@@ -111,8 +115,8 @@ export function initDB() {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type Workout     = { id: number; name: string; is_cardio: number; created_at: string };
-export type Exercise    = { id: number; workout_id: number; name: string; sort_order: number; is_hidden: number };
+export type Workout     = { id: number; name: string; is_cardio: number; created_at: string; is_pinned: number };
+export type Exercise    = { id: number; workout_id: number; name: string; sort_order: number; is_hidden: number; notes?: string };
 export type Session     = { id: number; workout_id: number; date: string; notes?: string; duration_seconds?: number };
 export type Set         = { id: number; session_id: number; exercise_id: number; weight: number; reps: number; set_number: number; comment?: string; duration_seconds?: number };
 export type CardioType  = { id: number; name: string };
@@ -129,7 +133,7 @@ export type Routine     = { id: number; name: string; type: RoutineType; created
 // ─── Workouts ─────────────────────────────────────────────────────────────────
 
 export function getWorkouts(): Workout[] {
-  return db.getAllSync('SELECT * FROM workouts ORDER BY is_cardio ASC, name ASC') as Workout[];
+  return db.getAllSync('SELECT * FROM workouts ORDER BY is_cardio ASC, is_pinned DESC, name ASC') as Workout[];
 }
 // Unique non-cardio workout names for progress tab deduplication
 export function getUniqueWorkoutNames(): string[] {
@@ -140,6 +144,13 @@ export function getUniqueWorkoutNames(): string[] {
 }
 export function addWorkout(name: string): number {
   return db.runSync('INSERT INTO workouts (name, is_cardio) VALUES (?, 0)', [name]).lastInsertRowId;
+}
+export function toggleWorkoutPin(id: number) {
+  const w = db.getFirstSync('SELECT is_pinned FROM workouts WHERE id = ?', [id]) as any;
+  db.runSync('UPDATE workouts SET is_pinned = ? WHERE id = ?', [w?.is_pinned ? 0 : 1, id]);
+}
+export function setExerciseNotes(id: number, notes: string) {
+  db.runSync('UPDATE exercises SET notes = ? WHERE id = ?', [notes || null, id]);
 }
 export function deleteWorkout(id: number) {
   db.runSync('DELETE FROM workouts WHERE id = ? AND is_cardio = 0', [id]);
@@ -578,9 +589,11 @@ export type ExerciseSummaryRow = {
   cur_weight: number;
   cur_reps: number;
   cur_duration: number | null;
+  cur_volume: number;
   prev_weight: number | null;
   prev_reps: number | null;
   prev_duration: number | null;
+  prev_volume: number | null;
   is_bw: boolean;
   is_duration: boolean;
 };
@@ -600,14 +613,16 @@ export function getSessionExerciseSummary(sessionId: number): ExerciseSummaryRow
     // Current session bests
     const cur = db.getFirstSync(`
       SELECT MAX(weight) as weight, MAX(reps) as reps,
-             MAX(COALESCE(duration_seconds,0)) as duration
+             MAX(COALESCE(duration_seconds,0)) as duration,
+             SUM(weight * reps) as volume
       FROM sets WHERE session_id = ? AND exercise_id = ?
     `, [sessionId, ex.id]) as any;
 
     // Previous session (most recent session before this one that has this exercise)
     const prev = db.getFirstSync(`
       SELECT MAX(st.weight) as weight, MAX(st.reps) as reps,
-             MAX(COALESCE(st.duration_seconds,0)) as duration
+             MAX(COALESCE(st.duration_seconds,0)) as duration,
+             SUM(st.weight * st.reps) as volume
       FROM sets st
       JOIN sessions s ON s.id = st.session_id
       WHERE st.exercise_id = ? AND s.date < ?
@@ -628,9 +643,11 @@ export function getSessionExerciseSummary(sessionId: number): ExerciseSummaryRow
       cur_weight:    cur?.weight ?? 0,
       cur_reps:      cur?.reps ?? 0,
       cur_duration:  cur?.duration > 0 ? cur.duration : null,
+      cur_volume:    cur?.volume ?? 0,
       prev_weight:   prev?.weight ?? null,
       prev_reps:     prev?.reps ?? null,
       prev_duration: prev?.duration > 0 ? prev.duration : null,
+      prev_volume:   prev?.volume ?? null,
       is_bw,
       is_duration,
     };

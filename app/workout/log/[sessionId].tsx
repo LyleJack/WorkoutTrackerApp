@@ -11,7 +11,7 @@ import Svg, { Circle } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import {
-  getExercises, addSet, getSetsForSession, deleteSet,
+  getExercises, addSet, getSetsForSession, deleteSet, setExerciseNotes,
   getLastSetForExercise, saveLastSessionTime, saveSessionDuration, getWorkouts,
   addExercise, reorderExercises, hideExercise, unhideExercise, getHiddenExercises,
   getPref, getRoutine, getRoutineDays, getRoutineProgress, updateRoutineProgress,
@@ -582,6 +582,8 @@ function LogScreenInner() {
   const finishedRef  = useRef(false);
   const startTime    = useRef(Date.now());
   const timerModeRef = useRef<'in-app' | 'overlay'>('in-app');
+  const [exerciseNotes,    setExerciseNotesState]   = useState<Record<number, string>>({});
+  const [notesExpanded,    setNotesExpanded]         = useState<Record<number, boolean>>({});
 
   const [dragging,    setDragging]    = useState<number | null>(null); // exercise id
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -612,6 +614,9 @@ function LogScreenInner() {
 
   const load = useCallback(() => {
     const exercises = getExercises(Number(workoutId));
+    const notesMap: Record<number, string> = {};
+    exercises.forEach(e => { if (e.notes) notesMap[e.id] = e.notes; });
+    setExerciseNotesState(notesMap);
     const hidden    = getHiddenExercises(Number(workoutId));
     setHiddenExercises(hidden);
     const sets      = getSetsForSession(Number(sessionId));
@@ -819,6 +824,8 @@ function LogScreenInner() {
     finishedRef.current = true;
     setFinished(true);
     setTimerVisible(false);
+    NativeFloatingTimer.hide();
+    NativeFloatingTimer.hide();
     const durationSeconds = Math.floor((Date.now() - startTime.current) / 1000);
     saveSessionDuration(Number(sessionId), durationSeconds);
     const allWorkouts = getWorkouts();
@@ -941,6 +948,19 @@ function LogScreenInner() {
                     <Ionicons name="reorder-three-outline" size={20} color={isDragging ? '#6C63FF' : '#2a2a2a'} />
                   </TouchableOpacity>
 
+                  {/* Notes button */}
+                  <TouchableOpacity
+                    style={styles.hideBtn}
+                    onPress={() => setNotesExpanded(prev => ({ ...prev, [exercise.id]: !prev[exercise.id] }))}
+                    hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+                  >
+                    <Ionicons
+                      name={exerciseNotes[exercise.id] ? 'document-text' : 'document-text-outline'}
+                      size={15}
+                      color={exerciseNotes[exercise.id] ? '#6C63FF' : '#222'}
+                    />
+                  </TouchableOpacity>
+
                   {/* Hide button */}
                   <TouchableOpacity
                     style={styles.hideBtn}
@@ -979,6 +999,22 @@ function LogScreenInner() {
                       {sets.length > 0 && <Ionicons name={isCollapsed ? 'chevron-down' : 'chevron-up'} size={16} color="#333" />}
                     </View>
                   </TouchableOpacity>
+                  {/* Inline exercise notes */}
+                  {notesExpanded[exercise.id] && (
+                    <TextInput
+                      style={[styles.exNotesInput, { color: t.textSecondary, borderColor: t.border }]}
+                      value={exerciseNotes[exercise.id] ?? ''}
+                      onChangeText={text => {
+                        setExerciseNotesState(prev => ({ ...prev, [exercise.id]: text }));
+                        setExerciseNotes(exercise.id, text);
+                      }}
+                      placeholder="Exercise notes…"
+                      placeholderTextColor={t.textFaint}
+                      multiline
+                      autoFocus
+                      onBlur={() => setNotesExpanded(prev => ({ ...prev, [exercise.id]: false }))}
+                    />
+                  )}
                 </View>
 
                 {!isCollapsed && (
@@ -1259,6 +1295,7 @@ const styles = StyleSheet.create({
 
   cardHeader:    { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 13, gap: 10 },
   titlePressable:{ flex: 1, flexDirection: 'row', alignItems: 'center' },
+  exNotesInput:  { fontSize: 12, paddingHorizontal: 14, paddingVertical: 8, borderTopWidth: 1, minHeight: 44, textAlignVertical: 'top', fontStyle: 'italic' },
 
   dragHandle:       { padding: 4, marginRight: -2 },
   dragHandleActive: { opacity: 1 },

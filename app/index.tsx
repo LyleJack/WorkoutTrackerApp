@@ -7,7 +7,6 @@ import {
   clearRoutineProgress,
   createSession,
   deleteRoutine,
-  getFirstSessionDate,
   getLastSessionSummary,
   getRecentSession,
   getRoutine,
@@ -18,6 +17,7 @@ import {
   isRoutinePaused,
   pauseRoutine, resumeRoutine,
   Routine,
+  toggleWorkoutPin,
   updateRoutineProgress,
   Workout
 } from '@/src/db';
@@ -27,6 +27,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   Animated, AppState, AppStateStatus,
   Dimensions,
   KeyboardAvoidingView,
@@ -143,6 +144,7 @@ export default function HomeScreen() {
   const t       = useTheme();
 
   const [workouts,  setWorkouts]  = useState<Workout[]>([]);
+  const [recentSession, setRecentSession] = useState<{ workout_id: number; finished: boolean } | null>(null);
   const [routine,   setRoutine]   = useState<Routine | null>(null);
   const [todayInfo, setTodayInfo] = useState<{ workout: Workout | null; isRest: boolean; dayIndex: number; totalDays: number } | null>(null);
   const [mode,      setMode]      = useState<'grid' | 'new' | 'template'>('grid');
@@ -197,39 +199,15 @@ export default function HomeScreen() {
       setTodayInfo(null);
       setRoutinePaused(false);
     }
-    // Check calendar anniversary milestone on every app open
-    const firstDate = getFirstSessionDate();
-    if (firstDate) {
-      const first = new Date(firstDate);
-      const today = new Date();
-      if (
-        today.getMonth()    === first.getMonth() &&
-        today.getDate()     === first.getDate()  &&
-        today.getFullYear()  >  first.getFullYear()
-      ) {
-        const years = today.getFullYear() - first.getFullYear();
-        const labels: Record<number, string> = {
-          1:  "1 year of training — happy anniversary! 🎂",
-          2:  "2 years of showing up 🎂🎂",
-          3:  "3 years strong 🎂🎂🎂",
-          4:  "4 years — incredible commitment 🎂🎂🎂🎂",
-          5:  "5 years of training! Half a decade 🎆",
-          6:  "6 years — elite dedication 🌟",
-          7:  "7 years of lifting — legendary 👑",
-          8:  "8 years strong 🦾",
-          9:  "9 years — almost a decade!",
-          10: "10 years of training! A full decade 🏆🌍",
-          15: "15 years — a way of life 🗿",
-          20: "20 years of training! Truly iconic 🌠",
-        };
-        const msg = labels[years] ?? `${years} year${years !== 1 ? "s" : ""} of training! 🎂`;
-        setMilestoneMsg(msg);
-      }
-    }
+    // Check milestone on every app open (anniversary + session count)
+    const total = getTotalWorkouts();
+    const milestoneMsg = checkMilestone(total);
+    if (milestoneMsg) setMilestoneMsg(milestoneMsg);
   }, []);
 
   useFocusEffect(useCallback(() => {
     load();
+    getRecentSession().then(r => setRecentSession(r ? { workout_id: r.workout_id, finished: r.finished } : null));
   }, [load]));
 
   // Auto-navigate only on cold app open (not tab switches)
@@ -246,6 +224,7 @@ export default function HomeScreen() {
   // ── Navigation helpers ──────────────────────────────────────────────────────
 
   async function startWorkout(w: Workout) {
+    try {
     if (w.is_cardio) {
       const sessionId = createSession(w.id);
       router.push(`/workout/cardio/${sessionId}`);
@@ -279,6 +258,10 @@ export default function HomeScreen() {
     const msg   = checkMilestone(total);
     if (msg) setMilestoneMsg(msg);
     router.push(`/workout/log/${sessionId}?workoutId=${w.id}`);
+    } catch (e: any) {
+      console.error('[startWorkout] crashed:', e?.message ?? e);
+      Alert.alert('Error starting workout', e?.message ?? String(e));
+    }
   }
 
   async function handlePress(w: Workout) {
@@ -494,12 +477,22 @@ export default function HomeScreen() {
             {liftWorkouts.map(w => {
               const { color } = getWorkoutIcon(w.name);
               const isToday   = todayInfo?.workout?.id === w.id;
+              const isActive  = recentSession?.workout_id === w.id && !recentSession?.finished;
               return (
                 <TouchableOpacity key={w.id}
-                  style={[styles.workoutCard, { borderColor: isToday ? t.purple + '55' : color + '30', backgroundColor: t.bgCard }]}
+                  style={[styles.workoutCard,
+                    { borderColor: isActive ? t.green + 'cc' : isToday ? t.purple + '88' : w.is_pinned ? color + '88' : color + '30',
+                      backgroundColor: t.bgCard,
+                      borderWidth: isActive ? 2 : 1,
+                      transform: isActive ? [{ scale: 1.03 }] : undefined },
+                  ]}
                   onPress={() => handlePress(w)}
+                  onLongPress={() => { toggleWorkoutPin(w.id); load(); }}
+                  delayLongPress={400}
                   activeOpacity={0.75}>
                   <View style={[styles.cardBg, { backgroundColor: color + '12' }]} />
+                  {w.is_pinned ? <Ionicons name="pin" size={10} color={color} style={styles.pinIcon} /> : null}
+                  {isActive ? <View style={[styles.activeDot, { backgroundColor: t.green }]} /> : null}
                   <WorkoutIcon name={w.name} size={44} />
                   <Text style={[styles.workoutName, { color: t.textPrimary }]} numberOfLines={2}>{w.name}</Text>
                   <WorkoutCardSummary workoutId={w.id} />
@@ -616,17 +609,31 @@ export default function HomeScreen() {
           {liftWorkouts.map(w => {
             const { color } = getWorkoutIcon(w.name);
             return (
-              <TouchableOpacity key={w.id}
-                style={[styles.workoutCard, { borderColor: color + '30', backgroundColor: t.bgCard }]}
-                onPress={() => handlePress(w)}
-                activeOpacity={0.75}>
-                <View style={[styles.cardBg, { backgroundColor: color + '12' }]} />
-                <WorkoutIcon name={w.name} size={52} />
-                <Text style={[styles.workoutName, { color: t.textPrimary }]} numberOfLines={2}>{w.name}</Text>
-                <WorkoutCardSummary workoutId={w.id} />
-              </TouchableOpacity>
+              (() => {
+                const isActiveGrid = recentSession?.workout_id === w.id && !recentSession?.finished;
+                return (
+                  <TouchableOpacity key={w.id}
+                    style={[styles.workoutCard,
+                      { borderColor: isActiveGrid ? t.green + 'cc' : w.is_pinned ? color + '88' : color + '30',
+                        backgroundColor: t.bgCard,
+                        borderWidth: isActiveGrid ? 2 : 1,
+                        transform: isActiveGrid ? [{ scale: 1.03 }] : undefined },
+                    ]}
+                    onPress={() => handlePress(w)}
+                    onLongPress={() => { toggleWorkoutPin(w.id); load(); }}
+                    delayLongPress={400}
+                    activeOpacity={0.75}>
+                    <View style={[styles.cardBg, { backgroundColor: color + '12' }]} />
+                    {w.is_pinned ? <Ionicons name="pin" size={10} color={color} style={styles.pinIcon} /> : null}
+                    {isActiveGrid ? <View style={[styles.activeDot, { backgroundColor: t.green }]} /> : null}
+                    <WorkoutIcon name={w.name} size={52} />
+                    <Text style={[styles.workoutName, { color: t.textPrimary }]} numberOfLines={2}>{w.name}</Text>
+                    <WorkoutCardSummary workoutId={w.id} />
+                  </TouchableOpacity>
+                );
+              })()
             );
-          })}
+            })};
         </View>
 
         {liftWorkouts.length === 0 && (
@@ -817,6 +824,8 @@ const styles = StyleSheet.create({
 
   grid:         { flexDirection: 'row', flexWrap: 'wrap', gap: CARD_GAP },
   workoutCard:  { width: CARD_W, aspectRatio: 1, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center', padding: 12, overflow: 'hidden', gap: 8 },
+  pinIcon:   { position: 'absolute', top: 8, right: 8 },
+  activeDot: { position: 'absolute', top: 8, left: 8, width: 8, height: 8, borderRadius: 4 },
   cardBg:       { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 20 },
   workoutName:  { fontSize: FONT.base, fontWeight: '700', textAlign: 'center', lineHeight: 17 },
   cardSummary:     { fontSize: FONT.xs, textAlign: 'center' },

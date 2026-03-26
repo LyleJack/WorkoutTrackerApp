@@ -103,20 +103,15 @@ function ProgressScreenInner() {
   }
 
   function buildChartPoints(points: ProgressPoint[], isBW: boolean, isDuration: boolean, baseColor: string, mixedColor: string) {
-    // Compute cumulative totals for volume mode on BW and duration exercises
-    let cumReps     = 0;
-    let cumDuration = 0;
-
     return points.map(p => {
-      cumReps     += p.total_reps ?? 0;
-      cumDuration += p.total_duration_seconds ?? 0;
-
       const isWeighted = p.weight > 0;
       let yVal: number;
       if (isDuration) {
-        yVal = viewMode === 'volume' ? cumDuration : (p.max_duration_seconds ?? 0);
+        // Volume mode: show per-session total duration (not cumulative)
+        yVal = viewMode === 'volume' ? (p.total_duration_seconds ?? 0) : (p.max_duration_seconds ?? 0);
       } else if (isBW) {
-        yVal = viewMode === 'volume' ? cumReps : (p.max_reps ?? 1);
+        // Volume mode: show per-session total reps (not cumulative)
+        yVal = viewMode === 'volume' ? (p.total_reps ?? 0) : (p.max_reps ?? 1);
       } else {
         yVal = viewMode === 'weight' ? p.weight : p.volume;
       }
@@ -128,20 +123,13 @@ function ProgressScreenInner() {
         onPress: () => {
           let label: string;
           if (isDuration) {
-            if (viewMode === 'volume') {
-              label = `${cumDuration}s total`;
-            } else {
-              label = formatDuration(p.max_duration_seconds ?? 0);
-              if (isWeighted) label += ` + ${p.weight} kg`;
-            }
+            label = viewMode === 'volume'
+              ? `${p.total_duration_seconds ?? 0}s this session`
+              : formatDuration(p.max_duration_seconds ?? 0) + (isWeighted ? ` + ${p.weight} kg` : '');
           } else if (isBW) {
-            if (viewMode === 'volume') {
-              label = `${cumReps} reps total`;
-            } else if (isWeighted) {
-              label = `${p.max_reps} reps + ${p.weight} kg`;
-            } else {
-              label = `${p.max_reps ?? '?'} reps`;
-            }
+            label = viewMode === 'volume'
+              ? `${p.total_reps ?? 0} reps this session`
+              : isWeighted ? `${p.max_reps} reps + ${p.weight} kg` : `${p.max_reps ?? '?'} reps`;
           } else {
             label = viewMode === 'weight' ? `${p.weight} kg` : `${Math.round(p.volume)} vol`;
           }

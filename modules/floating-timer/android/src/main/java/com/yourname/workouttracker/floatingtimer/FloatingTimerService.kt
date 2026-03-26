@@ -11,6 +11,7 @@ import android.util.DisplayMetrics
 import android.view.*
 import android.view.animation.DecelerateInterpolator
 import androidx.core.app.NotificationCompat
+import android.os.PowerManager
 
 /**
  * FloatingTimerService
@@ -46,6 +47,7 @@ class FloatingTimerService : Service() {
     private var containerView: View?       = null
     private var dismissTarget: View?       = null
     private var isDragging = false
+    private var wakeLock:  PowerManager.WakeLock? = null
 
     private val handler   = Handler(Looper.getMainLooper())
     private var remaining = 0
@@ -193,6 +195,15 @@ class FloatingTimerService : Service() {
         windowManager.addView(container, params)
         animateIn(container)
         handler.postDelayed(tickRunnable, 1_000)
+
+        // Acquire partial wake lock so ticker keeps running when screen is off
+        if (wakeLock == null) {
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "WorkoutTracker:FloatingTimer"
+            ).also { it.acquire(60 * 60 * 1000L) } // max 1hr
+        }
     }
 
     private fun updateTimer(seconds: Int) {
@@ -213,6 +224,8 @@ class FloatingTimerService : Service() {
         hideDismissTarget()
         containerView?.let { try { windowManager.removeView(it) } catch (_: Exception) {} }
         containerView = null; bubbleView = null
+        // Release wake lock
+        try { wakeLock?.let { if (it.isHeld) it.release() }; wakeLock = null } catch (_: Exception) {}
     }
 
     // ── Custom drawn bubble view ───────────────────────────────────────────────

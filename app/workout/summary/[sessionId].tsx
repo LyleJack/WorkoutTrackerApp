@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Platform, StatusBar } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Platform, StatusBar } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
@@ -8,6 +8,7 @@ import { FONT } from '@/src/theme';
 import { formatDuration } from '@/src/utils';
 import {
   getSessionExerciseSummary, getSessionCardioSummary,
+  updateSessionNotes, checkMilestone, getTotalWorkouts,
   ExerciseSummaryRow, CardioSummaryRow,
 } from '@/src/db';
 
@@ -71,14 +72,24 @@ export default function SummaryScreen() {
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
   const router = useRouter();
   const t = useTheme();
-  const [exerciseRows, setExerciseRows] = useState<ExerciseSummaryRow[]>([]);
-  const [cardioRows,   setCardioRows]   = useState<CardioSummaryRow[]>([]);
+  const [exerciseRows,   setExerciseRows]   = useState<ExerciseSummaryRow[]>([]);
+  const [cardioRows,     setCardioRows]     = useState<CardioSummaryRow[]>([]);
+  const [notes,          setNotes]          = useState('');
+  const [milestoneMsg,   setMilestoneMsg]   = useState<string | null>(null);
 
   useEffect(() => {
     const sid = Number(sessionId);
     setExerciseRows(getSessionExerciseSummary(sid));
     setCardioRows(getSessionCardioSummary(sid));
+    const total = getTotalWorkouts();
+    const msg   = checkMilestone(total);
+    if (msg) setMilestoneMsg(msg);
   }, [sessionId]);
+
+  function handleNotesChange(text: string) {
+    setNotes(text);
+    updateSessionNotes(Number(sessionId), text);
+  }
 
   const headline = getHeadline(exerciseRows);
   const isCardio = exerciseRows.length === 0 && cardioRows.length > 0;
@@ -106,7 +117,7 @@ export default function SummaryScreen() {
           <View style={[s.card, { backgroundColor: t.bgCard, borderColor: t.border }]}>
             <Text style={[s.cardTitle, { color: t.purple }]}>Exercise Breakdown</Text>
             {exerciseRows.map((row, i) => {
-              let delta = 0, unit = '';
+              let delta = 0, unit = '', subNote: string | null = null;
               if (row.is_duration) {
                 delta = (row.cur_duration ?? 0) - (row.prev_duration ?? row.cur_duration ?? 0);
                 unit  = 's';
@@ -114,8 +125,22 @@ export default function SummaryScreen() {
                 delta = row.cur_reps - (row.prev_reps ?? row.cur_reps);
                 unit  = ' reps';
               } else {
-                delta = row.cur_weight - (row.prev_weight ?? row.cur_weight);
-                unit  = ' kg';
+                // Weight-based: if weight dropped, check if volume is a new record instead
+                const weightDelta = row.cur_weight - (row.prev_weight ?? row.cur_weight);
+                if (weightDelta < 0 && row.prev_volume != null) {
+                  const volDelta = row.cur_volume - row.prev_volume;
+                  if (volDelta > 0) {
+                    delta   = volDelta;
+                    unit    = ' vol';
+                    subNote = 'Volume PR despite lower weight';
+                  } else {
+                    delta = weightDelta;
+                    unit  = ' kg';
+                  }
+                } else {
+                  delta = weightDelta;
+                  unit  = ' kg';
+                }
               }
 
               const curLabel = row.is_duration
@@ -127,7 +152,10 @@ export default function SummaryScreen() {
 
               return (
                 <View key={i} style={[s.exRow, { borderTopColor: t.border }]}>
-                  <Text style={[s.exName, { color: t.textSecondary }]}>{row.exercise_name}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.exName, { color: t.textSecondary }]}>{row.exercise_name}</Text>
+                    {subNote ? <Text style={[s.exSub, { color: t.orange }]}>{subNote}</Text> : null}
+                  </View>
                   <Text style={[s.exVal, { color: t.textPrimary }]}>{curLabel}</Text>
                   {hasPrev ? <DeltaBadge delta={delta} unit={unit} /> : <Text style={[sd.delta, { color: t.textMuted }]}>first</Text>}
                 </View>
@@ -158,6 +186,25 @@ export default function SummaryScreen() {
             })}
           </View>
         )}
+
+        {milestoneMsg && (
+          <View style={[s.milestoneCard, { backgroundColor: t.purpleBg, borderColor: t.purple + '44' }]}>
+            <Text style={[s.milestoneText, { color: t.purple }]}>{milestoneMsg}</Text>
+          </View>
+        )}
+
+        {/* Session notes — inline, no popup */}
+        <View style={[s.notesCard, { backgroundColor: t.bgCard, borderColor: t.border }]}>
+          <Text style={[s.notesLabel, { color: t.textMuted }]}>Session notes</Text>
+          <TextInput
+            style={[s.notesInput, { color: t.textPrimary }]}
+            placeholder="How did it go? Any observations…"
+            placeholderTextColor={t.textFaint}
+            value={notes}
+            onChangeText={handleNotesChange}
+            multiline
+          />
+        </View>
 
         <TouchableOpacity style={[s.doneBtn, { backgroundColor: t.purple }]} onPress={done}>
           <Ionicons name="checkmark-circle" size={20} color="#fff" />
@@ -202,6 +249,12 @@ const s = StyleSheet.create({
     gap: 10, padding: 17, borderRadius: 16, marginTop: 8,
   },
   doneBtnText: { color: '#fff', fontSize: FONT.xl, fontWeight: '700' },
+  exSub:  { fontSize: FONT.sm, marginTop: 1 },
+  milestoneCard: { borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, alignItems: 'center' },
+  milestoneText: { fontSize: FONT.md, fontWeight: '700', textAlign: 'center' },
+  notesCard:  { borderRadius: 14, padding: 14, marginBottom: 12, borderWidth: 1 },
+  notesLabel: { fontSize: FONT.sm, fontWeight: '600', marginBottom: 6 },
+  notesInput: { fontSize: FONT.md, minHeight: 60, textAlignVertical: 'top' },
 });
 
 const sd = StyleSheet.create({

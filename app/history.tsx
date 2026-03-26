@@ -420,9 +420,19 @@ function HistoryScreenInner() {
       if (!byEx[s.exercise_name]) byEx[s.exercise_name] = [];
       byEx[s.exercise_name].push(s);
     });
+    // Build a name→notes map from exercises
+    const exercises = getExercises(selected?.workout_id ?? 0);
+    const exNotes: Record<string, string | undefined> = {};
+    exercises.forEach(e => { exNotes[e.name] = e.notes ?? undefined; });
+
     return Object.entries(byEx).map(([exName, sets]) => (
       <View key={exName} style={[ds.exBlock, { borderBottomColor: t.border }]}>
         <Text style={[ds.exName, { color: t.purple }]}>{exName}</Text>
+        {exNotes[exName] ? (
+          <Text style={[ds.exNote, { color: t.textMuted }]} numberOfLines={2} ellipsizeMode="tail">
+            {exNotes[exName]}
+          </Text>
+        ) : null}
         {sets.map(s => {
           const durSecs  = (s as any).duration_seconds as number | undefined;
           const durLabel = durSecs && durSecs > 0
@@ -813,6 +823,7 @@ const ds = StyleSheet.create({
   setNum:      { fontSize: 13, width: 20, textAlign: 'center' },
   setVal:      { fontSize: 14, flex: 1 },
   setNote:     { fontSize: 13, fontStyle: 'italic' },
+  exNote:      { fontSize: 11, fontStyle: 'italic', marginTop: 2, marginBottom: 4 },
   setActions:  { flexDirection: 'row', gap: 12 },
   iconBtn:     { padding: 4 },
   editRow:     { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 },
