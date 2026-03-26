@@ -7,6 +7,7 @@ const db = SQLite.openDatabaseSync('workouttracker.db');
 
 export function initDB() {
   db.execSync(`
+    PRAGMA foreign_keys = ON;
     PRAGMA journal_mode = WAL;
 
     CREATE TABLE IF NOT EXISTS workouts (
@@ -111,14 +112,18 @@ export function initDB() {
   // Migration: add is_rest and day_of_week to routine_days if missing (for existing installs)
   try { db.execSync('ALTER TABLE routine_days ADD COLUMN is_rest INTEGER DEFAULT 0'); } catch {}
   try { db.execSync('ALTER TABLE routine_days ADD COLUMN day_of_week INTEGER'); } catch {}
+
+  // Migration: per-exercise rest timer (seconds) + planned sets (repeat last session)
+  try { db.execSync('ALTER TABLE exercises ADD COLUMN rest_seconds INTEGER'); } catch {}
+  try { db.execSync('ALTER TABLE sets ADD COLUMN is_planned INTEGER DEFAULT 0'); } catch {}
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type Workout     = { id: number; name: string; is_cardio: number; created_at: string; is_pinned: number };
-export type Exercise    = { id: number; workout_id: number; name: string; sort_order: number; is_hidden: number; notes?: string };
+export type Exercise    = { id: number; workout_id: number; name: string; sort_order: number; is_hidden: number; notes?: string; rest_seconds?: number | null };
 export type Session     = { id: number; workout_id: number; date: string; notes?: string; duration_seconds?: number };
-export type Set         = { id: number; session_id: number; exercise_id: number; weight: number; reps: number; set_number: number; comment?: string; duration_seconds?: number };
+export type Set         = { id: number; session_id: number; exercise_id: number; weight: number; reps: number; set_number: number; comment?: string; duration_seconds?: number; is_planned?: number };
 export type CardioType  = { id: number; name: string };
 export type CardioLog   = { id: number; session_id: number; cardio_type_id: number; duration_minutes: number; calories?: number; distance_km?: number; notes?: string };
 export type CardioLogFull = CardioLog & { cardio_type_name: string; date: string };
@@ -151,6 +156,9 @@ export function toggleWorkoutPin(id: number) {
 }
 export function setExerciseNotes(id: number, notes: string) {
   db.runSync('UPDATE exercises SET notes = ? WHERE id = ?', [notes || null, id]);
+}
+export function setExerciseRestSeconds(id: number, restSeconds: number | null) {
+  db.runSync('UPDATE exercises SET rest_seconds = ? WHERE id = ?', [restSeconds ?? null, id]);
 }
 export function deleteWorkout(id: number) {
   db.runSync('DELETE FROM workouts WHERE id = ? AND is_cardio = 0', [id]);
@@ -219,12 +227,23 @@ export function saveSessionDuration(sessionId: number, durationSeconds: number) 
 // ─── Sets ─────────────────────────────────────────────────────────────────────
 
 export function getSetsForSession(sessionId: number): Set[] {
-  return db.getAllSync('SELECT * FROM sets WHERE session_id = ? ORDER BY exercise_id, set_number', [sessionId]) as Set[];
+  return db.getAllSync(
+    'SELECT * FROM sets WHERE session_id = ? AND (is_planned IS NULL OR is_planned = 0) ORDER BY exercise_id, set_number',
+    [sessionId]
+  ) as Set[];
 }
-export function addSet(sessionId: number, exerciseId: number, weight: number, reps: number, setNumber: number, comment?: string, durationSeconds?: number): number {
+
+/** Includes planned sets (used for repeat-last-session templates during logging). */
+export function getSetsForSessionIncludingPlanned(sessionId: number): Set[] {
+  return db.getAllSync(
+    'SELECT * FROM sets WHERE session_id = ? ORDER BY exercise_id, set_number',
+    [sessionId]
+  ) as Set[];
+}
+export function addSet(sessionId: number, exerciseId: number, weight: number, reps: number, setNumber: number, comment?: string, durationSeconds?: number, isPlanned = 0): number {
   return db.runSync(
-    'INSERT INTO sets (session_id, exercise_id, weight, reps, set_number, comment, duration_seconds) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [sessionId, exerciseId, weight, reps, setNumber, comment ?? null, durationSeconds ?? null]
+    'INSERT INTO sets (session_id, exercise_id, weight, reps, set_number, comment, duration_seconds, is_planned) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [sessionId, exerciseId, weight, reps, setNumber, comment ?? null, durationSeconds ?? null, isPlanned ? 1 : 0]
   ).lastInsertRowId;
 }
 export function updateSet(id: number, weight: number, reps: number, comment?: string, durationSeconds?: number) {
@@ -232,6 +251,9 @@ export function updateSet(id: number, weight: number, reps: number, comment?: st
 }
 export function updateSetFull(id: number, weight: number, reps: number, comment: string, durationSeconds?: number) {
   db.runSync('UPDATE sets SET weight = ?, reps = ?, comment = ?, duration_seconds = ? WHERE id = ?', [weight, reps, comment || null, durationSeconds ?? null, id]);
+}
+export function setSetPlanned(id: number, isPlanned: boolean) {
+  db.runSync('UPDATE sets SET is_planned = ? WHERE id = ?', [isPlanned ? 1 : 0, id]);
 }
 export function deleteSet(id: number) {
   db.runSync('DELETE FROM sets WHERE id = ?', [id]);
@@ -241,9 +263,13 @@ export function getLastSetForExercise(exerciseId: number): Set | null {
     SELECT st.* FROM sets st
     JOIN sessions s ON s.id = st.session_id
     WHERE st.exercise_id = ?
+      AND (st.is_planned IS NULL OR st.is_planned = 0)
     ORDER BY s.date DESC, st.set_number DESC
     LIMIT 1
   `, [exerciseId]) as Set | null;
+}
+export function deleteSetsForSessionExercise(sessionId: number, exerciseId: number) {
+  db.runSync('DELETE FROM sets WHERE session_id = ? AND exercise_id = ?', [sessionId, exerciseId]);
 }
 
 // ─── Cardio Types ─────────────────────────────────────────────────────────────
@@ -305,8 +331,8 @@ export function getHistory(limit = 50): HistorySession[] {
     SELECT
       s.id as session_id, s.workout_id, w.name as workout_name,
       s.date, s.created_at, s.notes, w.is_cardio, s.duration_seconds,
-      (SELECT COUNT(*)                      FROM sets st WHERE st.session_id = s.id) as set_count,
-      (SELECT COALESCE(SUM(st.weight*st.reps),0) FROM sets st WHERE st.session_id = s.id) as total_volume,
+      (SELECT COUNT(*)                      FROM sets st WHERE st.session_id = s.id AND (st.is_planned IS NULL OR st.is_planned = 0)) as set_count,
+      (SELECT COALESCE(SUM(st.weight*st.reps),0) FROM sets st WHERE st.session_id = s.id AND (st.is_planned IS NULL OR st.is_planned = 0)) as total_volume,
       (SELECT SUM(cl.duration_minutes)      FROM cardio_logs cl WHERE cl.session_id = s.id) as cardio_duration,
       (SELECT SUM(cl.calories)              FROM cardio_logs cl WHERE cl.session_id = s.id) as cardio_calories,
       (SELECT GROUP_CONCAT(DISTINCT ct.name)
@@ -325,6 +351,7 @@ export function getSessionDetails(sessionId: number): { session: Session; sets: 
     SELECT st.*, e.name as exercise_name FROM sets st
     JOIN exercises e ON e.id = st.exercise_id
     WHERE st.session_id = ?
+      AND (st.is_planned IS NULL OR st.is_planned = 0)
     ORDER BY e.sort_order, st.set_number
   `, [sessionId]) as (Set & { exercise_name: string })[];
   return { session, sets, cardioLogs: getCardioLogsForSession(sessionId) };
@@ -384,6 +411,7 @@ export function getExerciseProgress(exerciseName: string): ProgressPoint[] {
     JOIN exercises e ON e.id = st.exercise_id
     JOIN sessions  s ON s.id = st.session_id
     WHERE LOWER(e.name) = LOWER(?)
+      AND (st.is_planned IS NULL OR st.is_planned = 0)
     GROUP BY s.date
     ORDER BY s.date ASC
   `, [exerciseName]) as ProgressPoint[];
@@ -399,6 +427,7 @@ export function getHistoricalExerciseNames(workoutName: string): string[] {
     JOIN sessions  s ON s.id          = st.session_id
     JOIN workouts  w ON w.id          = s.workout_id
     WHERE LOWER(w.name) = LOWER(?)
+      AND (st.is_planned IS NULL OR st.is_planned = 0)
     ORDER BY e.name ASC
   `, [workoutName]) as { name: string }[];
   return rows.map(r => r.name);
@@ -411,6 +440,7 @@ export function getAllExerciseNames(): string[] {
     SELECT DISTINCT LOWER(e.name) as name_lower, e.name
     FROM sets st
     JOIN exercises e ON e.id = st.exercise_id
+    WHERE (st.is_planned IS NULL OR st.is_planned = 0)
     ORDER BY LOWER(e.name) ASC
   `) as { name_lower: string; name: string }[];
   // Deduplicate case-insensitively, prefer the capitalised version
@@ -433,6 +463,7 @@ export function getExerciseProgressGlobal(exerciseName: string): ProgressPoint[]
     JOIN exercises e ON e.id = st.exercise_id
     JOIN sessions  s ON s.id = st.session_id
     WHERE LOWER(e.name) = LOWER(?)
+      AND (st.is_planned IS NULL OR st.is_planned = 0)
     GROUP BY s.date
     ORDER BY s.date ASC
   `, [exerciseName]) as ProgressPoint[];
@@ -469,6 +500,7 @@ export function getExerciseProgressById(exerciseId: number): ProgressPoint[] {
     SELECT s.date, MAX(st.weight) as weight, SUM(st.weight * st.reps) as volume, MAX(st.reps) as max_reps
     FROM sets st JOIN sessions s ON s.id = st.session_id
     WHERE st.exercise_id = ?
+      AND (st.is_planned IS NULL OR st.is_planned = 0)
     GROUP BY s.date ORDER BY s.date ASC
   `, [exerciseId]) as ProgressPoint[];
 }
@@ -483,71 +515,100 @@ export function getFirstSessionDate(): string | null {
   } catch { return null; }
 }
 
-/** Returns a milestone message if today marks an anniversary or session count milestone, else null.
- *  Checks real calendar years from first session date, plus fixed session-count milestones. */
-export function checkMilestone(total: number): string | null {
+function getYearAnniversaryMessage(years: number): string | null {
+  if (years <= 0) return null;
+  const specials: Record<number, string> = {
+    1: "1 year of training — your first full lap around the sun! 🌞",
+    2: "2 years of showing up — consistency unlocked 🔓",
+    3: "3 years strong — discipline is now your superpower ⚡",
+    4: "4 years in — still building, still growing 🌱",
+    5: "5 years! Half a decade of hard work 🎆",
+    6: "6 years — this is lifestyle territory now 🧭",
+    7: "7 years — legendary attendance streak vibes 👑",
+    8: "8 years strong — iron will, iron plates 🦾",
+    9: "9 years — decade mode loading... ⏳",
+    10: "10 years! A full decade of training mastery 🏆",
+    11: "11 years — no luck needed, just consistency 🍀",
+    12: "12 years — a full training calendar cycle x12 📆",
+    13: "13 years — unbreakable momentum 🚂",
+    14: "14 years — built, not borrowed 🧱",
+    15: "15 years — a way of life at this point 🗿",
+    16: "16 years — elite long-game commitment 🎯",
+    17: "17 years — quietly unstoppable 🌊",
+    18: "18 years — training adulthood achieved 🎓",
+    19: "19 years — one rep from 20 🔥",
+    20: "20 years! Two decades of dedication 🌍",
+  };
+  return specials[years] ?? `${years} years of training — still leveling up 🎂`;
+}
+
+/** Returns a milestone message if today marks an anniversary or session-count milestone, else null.
+ *  Session-count milestones include the configured Settings offset (streak bonus). */
+export async function checkMilestone(total: number): Promise<string | null> {
+  const offset = await getStreakOffset();
+  const adjustedTotal = Math.max(0, total + offset);
+
   // ── Session count milestones ──────────────────────────────────────────────
   const countMilestones: Record<number, string> = {
-    1:    "First workout logged! The journey begins 🎉",
-    5:    "5 sessions done — off to a great start!",
-    10:   "10 sessions — double digits! 💪",
-    25:   "25 sessions — a habit is forming 🔥",
-    50:   "50 sessions! Halfway to a century 🏅",
-    75:   "75 sessions — three quarters to 100!",
-    100:  "100 sessions! A true century 🏆",
-    150:  "150 sessions — seriously committed 💎",
-    200:  "200 sessions — keep going! 💪",
-    250:  "250 sessions — elite consistency 🔥",
-    300:  "300 sessions! The 300 club 🛡️",
-    400:  "400 sessions — unstoppable force 🌊",
-    500:  "500 sessions! Half a thousand 🌟",
-    600:  "600 sessions — extraordinary dedication 🎯",
-    750:  "750 sessions — three quarters to a thousand!",
-    1000: "1000 sessions! One thousand workouts 🚀👑",
-    1250: "1250 sessions — absolutely legendary 🌟",
-    1500: "1500 sessions! Relentless 🏔️",
+    1: "First workout logged! Your origin story begins 🦸",
+    2: "2 sessions in — the sequel is already better 🎬",
+    3: "3 sessions — momentum is real now 🛞",
+    4: "4 sessions — building the base layer 🧱",
+    5: "5 sessions done — off to a great start! 🚀",
+    7: "7 sessions — one full week of proof ✅",
+    10: "10 sessions — double digits! 💪",
+    12: "12 sessions — dozen reps of consistency 🥚",
+    15: "15 sessions — your habit is showing 👀",
+    20: "20 sessions — automatic pilot engaged ✈️",
+    25: "25 sessions — quarter-century club 🥈",
+    30: "30 sessions — full month of commitment 📆",
+    40: "40 sessions — form + focus + follow-through 🎯",
+    50: "50 sessions! Halfway to a century 🏅",
+    60: "60 sessions — quietly elite consistency 🧠",
+    75: "75 sessions — three quarters to 100! 🔥",
+    90: "90 sessions — century countdown is on ⏱️",
+    100: "100 sessions! A true century 🏆",
+    125: "125 sessions — still collecting wins 📈",
+    150: "150 sessions — seriously committed 💎",
+    175: "175 sessions — no brakes, all traction 🛞",
+    200: "200 sessions — keep going! 🌟",
+    250: "250 sessions — elite consistency 🔥",
+    300: "300 sessions! The 300 club 🛡️",
+    365: "365 sessions — one full year of workouts 📅",
+    400: "400 sessions — unstoppable force 🌊",
+    500: "500 sessions! Half a thousand 🌠",
+    600: "600 sessions — extraordinary dedication 🎯",
+    750: "750 sessions — three quarters to a thousand 🛰️",
+    1000: "1000 sessions! Four digits of discipline 👑",
+    1250: "1250 sessions — absolutely legendary 🏛️",
+    1500: "1500 sessions! Relentless energy ⚡",
     2000: "2000 sessions — beyond elite 🌍",
-    2500: "2500 sessions — you are the gym 🏛️",
-    5000: "5000 sessions — a lifetime of fitness 🌠",
+    2500: "2500 sessions — you are the gym now 🗿",
+    5000: "5000 sessions — lifetime achievement unlocked 🪐",
   };
-  const countMsg = countMilestones[total] ?? null;
+  const countMsg = countMilestones[adjustedTotal] ?? null;
 
-  // ── Calendar anniversary milestones ───────────────────────────────────────
+  // ── Calendar anniversary milestones (every single year) ──────────────────
   let yearMsg: string | null = null;
   const firstDate = getFirstSessionDate();
   if (firstDate) {
     const first = new Date(firstDate);
     const today = new Date();
-    // Same month and day as first session?
     if (
-      today.getMonth()   === first.getMonth() &&
-      today.getDate()    === first.getDate() &&
+      today.getMonth() === first.getMonth() &&
+      today.getDate() === first.getDate() &&
       today.getFullYear() > first.getFullYear()
     ) {
       const years = today.getFullYear() - first.getFullYear();
-      const labels: Record<number, string> = {
-        1:  "1 year of training — happy anniversary! 🎂",
-        2:  "2 years of showing up 🎂🎂",
-        3:  "3 years strong 🎂🎂🎂",
-        4:  "4 years — incredible commitment 🎂🎂🎂🎂",
-        5:  "5 years of training! Half a decade 🎆",
-        6:  "6 years — elite dedication 🌟",
-        7:  "7 years of lifting — legendary 👑",
-        8:  "8 years strong 🦾",
-        9:  "9 years — almost a decade!",
-        10: "10 years of training! A full decade 🏆🌍",
-        15: "15 years — a way of life 🗿",
-        20: "20 years of training! Truly iconic 🌠",
-      };
-      yearMsg = labels[years] ?? (years > 0 ? `${years} year${years !== 1 ? 's' : ''} of training! 🎂` : null);
+      yearMsg = getYearAnniversaryMessage(years);
     }
   }
 
-  // Year anniversary takes priority if both fire on same day
+  // Year anniversary takes priority if both fire on same day.
   return yearMsg ?? countMsg;
 }
-export function getTotalSets():     number { return (db.getFirstSync('SELECT COUNT(*) as c FROM sets') as any).c; }
-export function getTotalVolume():   number { return Math.round((db.getFirstSync('SELECT SUM(weight*reps) as t FROM sets') as any)?.t ?? 0); }
+export function getTotalSets():     number { return (db.getFirstSync('SELECT COUNT(*) as c FROM sets WHERE (is_planned IS NULL OR is_planned = 0)') as any).c; }
+export function getTotalVolume():   number { return Math.round((db.getFirstSync('SELECT SUM(weight*reps) as t FROM sets WHERE (is_planned IS NULL OR is_planned = 0)') as any)?.t ?? 0); }
 
 export function getThisWeekSessions(): number {
   return (db.getFirstSync("SELECT COUNT(DISTINCT date) as c FROM sessions WHERE date >= date('now','-6 days')") as any)?.c ?? 0;
@@ -561,6 +622,7 @@ export function getPersonalBests(): { exercise_name: string; weight: number; rep
            MAX(COALESCE(st.duration_seconds, 0)) as max_duration,
            CASE WHEN AVG(CASE WHEN st.weight = 0 THEN 1.0 ELSE 0.0 END) >= 0.5 THEN 1 ELSE 0 END as is_bw
     FROM sets st JOIN exercises e ON e.id = st.exercise_id
+    WHERE (st.is_planned IS NULL OR st.is_planned = 0)
     GROUP BY LOWER(e.name)
     ORDER BY weight DESC LIMIT 10
   `) as { exercise_name: string; weight: number; reps: number; max_reps: number; is_bw: number; max_duration: number }[];
@@ -571,7 +633,7 @@ export function getLastSessionSummary(workoutId: number): { daysAgo: number; tot
   if (!session) return null;
   const today = new Date(); today.setHours(0,0,0,0);
   const daysAgo = Math.round((today.getTime() - new Date(session.date + 'T00:00:00').getTime()) / 86400000);
-  const sets = db.getAllSync('SELECT weight, reps FROM sets WHERE session_id = ?', [session.id]) as { weight: number; reps: number }[];
+  const sets = db.getAllSync('SELECT weight, reps FROM sets WHERE session_id = ? AND (is_planned IS NULL OR is_planned = 0)', [session.id]) as { weight: number; reps: number }[];
   return { daysAgo, totalSets: sets.length, totalVolume: sets.reduce((s, r) => s + r.weight * r.reps, 0) };
 }
 
@@ -603,6 +665,7 @@ export function getSessionExerciseSummary(sessionId: number): ExerciseSummaryRow
     SELECT DISTINCT e.id, e.name
     FROM sets st JOIN exercises e ON e.id = st.exercise_id
     WHERE st.session_id = ?
+      AND (st.is_planned IS NULL OR st.is_planned = 0)
     ORDER BY e.sort_order
   `, [sessionId]) as { id: number; name: string }[];
 
@@ -615,7 +678,7 @@ export function getSessionExerciseSummary(sessionId: number): ExerciseSummaryRow
       SELECT MAX(weight) as weight, MAX(reps) as reps,
              MAX(COALESCE(duration_seconds,0)) as duration,
              SUM(weight * reps) as volume
-      FROM sets WHERE session_id = ? AND exercise_id = ?
+      FROM sets WHERE session_id = ? AND exercise_id = ? AND (is_planned IS NULL OR is_planned = 0)
     `, [sessionId, ex.id]) as any;
 
     // Previous session (most recent session before this one that has this exercise)
@@ -625,13 +688,13 @@ export function getSessionExerciseSummary(sessionId: number): ExerciseSummaryRow
              SUM(st.weight * st.reps) as volume
       FROM sets st
       JOIN sessions s ON s.id = st.session_id
-      WHERE st.exercise_id = ? AND s.date < ?
+      WHERE st.exercise_id = ? AND s.date < ? AND (st.is_planned IS NULL OR st.is_planned = 0)
       ORDER BY s.date DESC LIMIT 1
     `, [ex.id, session.date]) as any;
 
     // Count total sets for this exercise across all history to determine BW
     const allSets = db.getAllSync(`
-      SELECT weight, duration_seconds FROM sets WHERE exercise_id = ?
+      SELECT weight, duration_seconds FROM sets WHERE exercise_id = ? AND (is_planned IS NULL OR is_planned = 0)
     `, [ex.id]) as { weight: number; duration_seconds: number | null }[];
 
     const bwCount  = allSets.filter(s => s.weight === 0).length;
@@ -700,6 +763,7 @@ export function getExerciseBest(exerciseName: string): { weight: number; reps: n
            AVG(CASE WHEN st.weight=0 THEN 1.0 ELSE 0.0 END) as bw_ratio
     FROM sets st JOIN exercises e ON e.id=st.exercise_id
     WHERE LOWER(e.name)=LOWER(?)
+      AND (st.is_planned IS NULL OR st.is_planned = 0)
   `, [exerciseName]) as any;
   if (!row || row.reps == null) return null;
   return { weight: row.weight ?? 0, reps: row.reps ?? 0, duration: row.duration ?? 0, is_bw: row.bw_ratio >= 0.5, is_duration: row.duration > 0 };
@@ -713,6 +777,7 @@ export function getExerciseTotalVolume(exerciseName: string): { volume: number; 
            AVG(CASE WHEN st.weight=0 THEN 1.0 ELSE 0.0 END) as bw_ratio
     FROM sets st JOIN exercises e ON e.id=st.exercise_id
     WHERE LOWER(e.name)=LOWER(?)
+      AND (st.is_planned IS NULL OR st.is_planned = 0)
   `, [exerciseName]) as any;
   return { volume: row?.volume ?? 0, reps: row?.reps ?? 0, duration: row?.duration ?? 0, is_bw: (row?.bw_ratio ?? 0) >= 0.5, is_duration: (row?.duration ?? 0) > 0 };
 }
@@ -725,6 +790,7 @@ export function getBestWorkoutDayVolume(workoutName: string): { date: string; vo
     JOIN sessions  s ON s.id  = st.session_id
     JOIN workouts  w ON w.id  = s.workout_id
     WHERE LOWER(w.name) = LOWER(?)
+      AND (st.is_planned IS NULL OR st.is_planned = 0)
     GROUP BY s.id
     ORDER BY volume DESC
     LIMIT 1
@@ -900,6 +966,7 @@ export function exportAllData() {
     sets:         db.getAllSync('SELECT * FROM sets'),
     cardio_types: db.getAllSync('SELECT * FROM cardio_types'),
     cardio_logs:  db.getAllSync('SELECT * FROM cardio_logs'),
+    prefs:        db.getAllSync('SELECT * FROM prefs'),
     routines:     db.getAllSync('SELECT * FROM routines'),
     routine_days: db.getAllSync('SELECT * FROM routine_days'),
     exportedAt:   new Date().toISOString(),
@@ -907,20 +974,78 @@ export function exportAllData() {
 }
 
 export function importAllData(data: any) {
-  db.execSync('DELETE FROM cardio_logs; DELETE FROM sets; DELETE FROM sessions; DELETE FROM exercises; DELETE FROM workouts; DELETE FROM cardio_types;');
-  for (const w  of (data.workouts     ?? []) as Workout[])    db.runSync('INSERT INTO workouts    (id,name,is_cardio,created_at) VALUES (?,?,?,?)', [w.id, w.name, w.is_cardio??0, w.created_at]);
-  for (const e  of (data.exercises    ?? []) as Exercise[])   db.runSync('INSERT INTO exercises   (id,workout_id,name,sort_order,is_hidden) VALUES (?,?,?,?,?)', [e.id, e.workout_id, e.name, e.sort_order, (e as any).is_hidden??0]);
-  for (const s  of (data.sessions     ?? []) as Session[])    db.runSync('INSERT INTO sessions    (id,workout_id,date,created_at,notes,duration_seconds) VALUES (?,?,?,?,?,?)', [s.id, s.workout_id, s.date, (s as any).created_at??null, s.notes??null, s.duration_seconds??null]);
-  for (const st of (data.sets         ?? []) as Set[])        db.runSync('INSERT INTO sets        (id,session_id,exercise_id,weight,reps,set_number,comment,duration_seconds) VALUES (?,?,?,?,?,?,?,?)', [st.id, st.session_id, st.exercise_id, st.weight, st.reps, st.set_number, st.comment??null, (st as any).duration_seconds??null]);
-  for (const ct of (data.cardio_types ?? []) as CardioType[]) db.runSync('INSERT OR IGNORE INTO cardio_types (id,name) VALUES (?,?)', [ct.id, ct.name]);
-  for (const cl of (data.cardio_logs  ?? []) as CardioLog[])  db.runSync('INSERT INTO cardio_logs (id,session_id,cardio_type_id,duration_minutes,calories,distance_km,notes) VALUES (?,?,?,?,?,?,?)', [cl.id, cl.session_id, cl.cardio_type_id, cl.duration_minutes, cl.calories??null, cl.distance_km??null, cl.notes??null]);
+  db.execSync(`
+    PRAGMA foreign_keys = OFF;
+    DELETE FROM cardio_logs;
+    DELETE FROM sets;
+    DELETE FROM sessions;
+    DELETE FROM exercises;
+    DELETE FROM workouts;
+    DELETE FROM cardio_types;
+    DELETE FROM prefs;
+    DELETE FROM routine_days;
+    DELETE FROM routines;
+    PRAGMA foreign_keys = ON;
+  `);
+
+  for (const w  of (data.workouts     ?? []) as any[]) {
+    db.runSync(
+      'INSERT INTO workouts (id,name,is_cardio,created_at,is_pinned) VALUES (?,?,?,?,?)',
+      [w.id, w.name, w.is_cardio ?? 0, w.created_at ?? null, w.is_pinned ?? 0]
+    );
+  }
+  for (const e  of (data.exercises    ?? []) as any[]) {
+    db.runSync(
+      'INSERT INTO exercises (id,workout_id,name,sort_order,is_hidden,notes,rest_seconds) VALUES (?,?,?,?,?,?,?)',
+      [e.id, e.workout_id, e.name, e.sort_order ?? 0, e.is_hidden ?? 0, e.notes ?? null, e.rest_seconds ?? null]
+    );
+  }
+  for (const s  of (data.sessions     ?? []) as any[]) {
+    db.runSync(
+      'INSERT INTO sessions (id,workout_id,date,created_at,notes,duration_seconds) VALUES (?,?,?,?,?,?)',
+      [s.id, s.workout_id, s.date, s.created_at ?? null, s.notes ?? null, s.duration_seconds ?? null]
+    );
+  }
+  for (const st of (data.sets         ?? []) as any[]) {
+    db.runSync(
+      'INSERT INTO sets (id,session_id,exercise_id,weight,reps,set_number,comment,duration_seconds,is_planned) VALUES (?,?,?,?,?,?,?,?,?)',
+      [st.id, st.session_id, st.exercise_id, st.weight ?? 0, st.reps ?? 0, st.set_number ?? 1, st.comment ?? null, st.duration_seconds ?? null, st.is_planned ?? 0]
+    );
+  }
+  for (const ct of (data.cardio_types ?? []) as any[]) db.runSync('INSERT OR IGNORE INTO cardio_types (id,name) VALUES (?,?)', [ct.id, ct.name]);
+  for (const cl of (data.cardio_logs  ?? []) as any[]) {
+    db.runSync(
+      'INSERT INTO cardio_logs (id,session_id,cardio_type_id,duration_minutes,calories,distance_km,notes) VALUES (?,?,?,?,?,?,?)',
+      [cl.id, cl.session_id, cl.cardio_type_id, cl.duration_minutes, cl.calories ?? null, cl.distance_km ?? null, cl.notes ?? null]
+    );
+  }
+  for (const p of (data.prefs ?? []) as any[]) {
+    if (p?.key != null) db.runSync('INSERT OR REPLACE INTO prefs (key,value) VALUES (?,?)', [p.key, p.value ?? null]);
+  }
+  for (const r of (data.routines ?? []) as any[]) {
+    db.runSync('INSERT INTO routines (id,name,type,created_at) VALUES (?,?,?,?)', [r.id, r.name, r.type ?? 'repeating', r.created_at ?? null]);
+  }
+  for (const rd of (data.routine_days ?? []) as any[]) {
+    db.runSync(
+      'INSERT INTO routine_days (id,routine_id,day_index,workout_id,is_rest,day_of_week) VALUES (?,?,?,?,?,?)',
+      [rd.id, rd.routine_id, rd.day_index, rd.workout_id ?? null, rd.is_rest ?? 0, rd.day_of_week ?? null]
+    );
+  }
 }
 
 // ─── Developer utilities ──────────────────────────────────────────────────────
 
 export function deleteAllData() {
-  db.execSync('DELETE FROM cardio_logs; DELETE FROM sets; DELETE FROM sessions; DELETE FROM exercises;');
-  db.runSync('DELETE FROM workouts WHERE is_cardio = 0');
+  db.execSync(`
+    DELETE FROM cardio_logs;
+    DELETE FROM sets;
+    DELETE FROM sessions;
+    DELETE FROM exercises;
+    DELETE FROM workouts WHERE is_cardio = 0;
+    DELETE FROM prefs;
+    DELETE FROM routine_days;
+    DELETE FROM routines;
+  `);
   // Re-seed cardio types in case they were cleared
   const count = (db.getFirstSync('SELECT COUNT(*) as c FROM cardio_types') as any).c;
   if (count === 0) {
@@ -928,6 +1053,14 @@ export function deleteAllData() {
       db.runSync('INSERT OR IGNORE INTO cardio_types (name) VALUES (?)', [name]);
     }
   }
+}
+
+export function getLastSessionIdForWorkout(workoutId: number, excludeSessionId?: number): number | null {
+  const row = db.getFirstSync(
+    'SELECT id FROM sessions WHERE workout_id = ? AND id != ? ORDER BY date DESC, id DESC LIMIT 1',
+    [workoutId, excludeSessionId ?? -1]
+  ) as { id: number } | null;
+  return row?.id ?? null;
 }
 
 export function populateDummyData() {

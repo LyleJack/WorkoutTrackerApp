@@ -201,7 +201,7 @@ export default function HomeScreen() {
     }
     // Check milestone on every app open (anniversary + session count)
     const total = getTotalWorkouts();
-    const milestoneMsg = checkMilestone(total);
+    const milestoneMsg = await checkMilestone(total);
     if (milestoneMsg) setMilestoneMsg(milestoneMsg);
   }, []);
 
@@ -255,7 +255,7 @@ export default function HomeScreen() {
     const sessionId = createSession(w.id);
     // Check milestone after creating the session
     const total = getTotalWorkouts();
-    const msg   = checkMilestone(total);
+    const msg   = await checkMilestone(total);
     if (msg) setMilestoneMsg(msg);
     router.push(`/workout/log/${sessionId}?workoutId=${w.id}`);
     } catch (e: any) {

@@ -8,6 +8,7 @@ import { FONT } from '@/src/theme';
 import { formatDuration } from '@/src/utils';
 import {
   getSessionExerciseSummary, getSessionCardioSummary,
+  getSessionDetails,
   updateSessionNotes, checkMilestone, getTotalWorkouts,
   ExerciseSummaryRow, CardioSummaryRow,
 } from '@/src/db';
@@ -78,12 +79,17 @@ export default function SummaryScreen() {
   const [milestoneMsg,   setMilestoneMsg]   = useState<string | null>(null);
 
   useEffect(() => {
-    const sid = Number(sessionId);
-    setExerciseRows(getSessionExerciseSummary(sid));
-    setCardioRows(getSessionCardioSummary(sid));
-    const total = getTotalWorkouts();
-    const msg   = checkMilestone(total);
-    if (msg) setMilestoneMsg(msg);
+    async function loadSummary() {
+      const sid = Number(sessionId);
+      setExerciseRows(getSessionExerciseSummary(sid));
+      setCardioRows(getSessionCardioSummary(sid));
+      const details = getSessionDetails(sid);
+      setNotes(details.session.notes ?? '');
+      const total = getTotalWorkouts();
+      const msg = await checkMilestone(total);
+      if (msg) setMilestoneMsg(msg);
+    }
+    loadSummary();
   }, [sessionId]);
 
   function handleNotesChange(text: string) {
